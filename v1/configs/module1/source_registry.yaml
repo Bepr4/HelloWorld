@@ -1,0 +1,70 @@
+sources:
+  - domain: whitehouse.gov
+    source_tier: P0
+    source_type: official
+    region: US
+    language: en
+    core_evidence_allowed: true
+
+  - domain: state.gov
+    source_tier: P0
+    source_type: official
+    region: US
+    language: en
+    core_evidence_allowed: true
+
+  - domain: un.org
+    source_tier: P0
+    source_type: international_org
+    region: global
+    language: en
+    core_evidence_allowed: true
+
+  - domain: reuters.com
+    source_tier: P1
+    source_type: wire
+    region: global
+    language: en
+    core_evidence_allowed: true
+
+  - domain: apnews.com
+    source_tier: P1
+    source_type: wire
+    region: global
+    language: en
+    core_evidence_allowed: true
+
+  - domain: bbc.com
+    source_tier: P1
+    source_type: international_media
+    region: global
+    language: en
+    core_evidence_allowed: true
+
+  - domain: aljazeera.com
+    source_tier: P1
+    source_type: international_media
+    region: middle_east
+    language: en
+    core_evidence_allowed: true
+
+  - domain: xinhuanet.com
+    source_tier: P1
+    source_type: international_media
+    region: china
+    language: zh
+    core_evidence_allowed: true
+
+  - domain: example-local.media
+    source_tier: P2
+    source_type: local_media
+    region: fixture
+    language: en
+    core_evidence_allowed: true
+
+  - domain: example-thinktank.org
+    source_tier: P3
+    source_type: think_tank
+    region: fixture
+    language: en
+    core_evidence_allowed: false

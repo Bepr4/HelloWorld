@@ -1,0 +1,7 @@
+{
+  "python.defaultInterpreterPath": "C:\\Users\\li636\\.conda\\envs\\v1\\python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.venvPath": "C:\\Users\\li636\\.conda\\envs",
+  "python-envs.defaultEnvManager": "ms-python.python:conda",
+  "python-envs.defaultPackageManager": "ms-python.python:conda"
+}

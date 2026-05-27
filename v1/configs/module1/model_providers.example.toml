@@ -1,0 +1,10 @@
+# 这个示例文件展示如何用 TOML 配置模型网关；真实 API Key 不放在这里，只放到 .env 或环境变量。
+model_provider = "Anthropic"
+model = "glm-5.1"
+
+[model_providers.Anthropic]
+name = "Anthropic"
+base_url = "http://your-compatible-api-host:port"
+wire_api = "anthropic_messages"
+requires_anthropic_auth = true
+anthropic_auth_scheme = "bearer"

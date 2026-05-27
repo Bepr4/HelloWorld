@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Module 1 Agent Workbench</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="chat-pane" aria-label="Agent 对话">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Module 1</p>
+            <h1>事件采集 Agent</h1>
+          </div>
+          <div class="run-state" id="runState">待机</div>
+        </header>
+
+        <div class="chat-log" id="chatLog">
+          <article class="message assistant">
+            <div class="avatar">A</div>
+            <div class="bubble">
+              <p>输入一个事件，我会启动模块一采集流程，并把范围、时间线、候选来源、抓取结果和最终材料包都展示出来。</p>
+            </div>
+          </article>
+        </div>
+
+        <form class="composer" id="agentForm">
+          <textarea
+            id="messageInput"
+            name="message"
+            rows="3"
+            placeholder="例如：Iran conflict / 最新美伊冲突 / 2020 年美伊冲突"
+            required
+          ></textarea>
+          <button type="submit" id="runButton">运行</button>
+        </form>
+      </section>
+
+      <section class="work-pane" aria-label="运行过程和结果">
+        <nav class="tabs" aria-label="结果视图">
+          <button class="tab active" data-tab="events" type="button">过程</button>
+          <button class="tab" data-tab="summary" type="button">结果</button>
+          <button class="tab" data-tab="json" type="button">JSON</button>
+          <button class="tab" data-tab="source" type="button">正文</button>
+        </nav>
+
+        <section class="tab-panel active" id="panel-events">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Trace</p>
+              <h2>步骤事件流</h2>
+            </div>
+            <button class="secondary" id="clearEvents" type="button">清空</button>
+          </div>
+          <div class="event-stream" id="eventStream"></div>
+        </section>
+
+        <section class="tab-panel" id="panel-summary">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Package</p>
+              <h2>结构化结果</h2>
+            </div>
+          </div>
+          <div class="summary-grid">
+            <div class="metric">
+              <span>来源</span>
+              <strong id="metricSources">0</strong>
+            </div>
+            <div class="metric">
+              <span>新闻块</span>
+              <strong id="metricBlocks">0</strong>
+            </div>
+            <div class="metric">
+              <span>时间线建议</span>
+              <strong id="metricSuggestions">0</strong>
+            </div>
+          </div>
+          <div class="result-list" id="resultList"></div>
+        </section>
+
+        <section class="tab-panel" id="panel-json">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Raw</p>
+              <h2>event_info_package.json</h2>
+            </div>
+          </div>
+          <pre class="json-view" id="jsonView">{}</pre>
+        </section>
+
+        <section class="tab-panel" id="panel-source">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Evidence</p>
+              <h2>来源正文预览</h2>
+            </div>
+          </div>
+          <div class="source-layout">
+            <div class="source-list" id="sourceList"></div>
+            <pre class="source-text" id="sourceText">选择一个来源查看正文。</pre>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

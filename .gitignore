@@ -1,0 +1,9 @@
+# Ignore everything
+*
+
+# Except
+!.gitignore
+!docs/
+!docs/**
+!v1/
+!v1/**

@@ -1,0 +1,30 @@
+# 这个测试文件验证模块一会把 web_search 配置解析成真正的网页搜索 provider，而不是 RSS provider。
+from module1.pipeline import _build_search_provider
+from module1.settings import Module1Settings
+from module1.news.search_providers import TavilySearchProvider, WebSearchProvider
+
+
+def test_pipeline_builds_web_search_provider():
+    settings = Module1Settings(
+        llm_provider="fake",
+        search_provider="web_search",
+        search_api_key="test-search-key",
+        brave_search_endpoint="https://api.search.brave.com/res/v1/web/search",
+    )
+
+    provider = _build_search_provider(settings)
+
+    assert isinstance(provider, TavilySearchProvider)
+
+
+def test_pipeline_builds_brave_provider_when_requested():
+    settings = Module1Settings(
+        llm_provider="fake",
+        search_provider="brave",
+        search_api_key="test-search-key",
+        brave_search_endpoint="https://api.search.brave.com/res/v1/web/search",
+    )
+
+    provider = _build_search_provider(settings)
+
+    assert isinstance(provider, WebSearchProvider)

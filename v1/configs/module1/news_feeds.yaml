@@ -1,0 +1,32 @@
+feeds:
+  - domain: whitehouse.gov
+    feed_url: https://www.whitehouse.gov/briefing-room/feed/
+    language: en
+
+  - domain: state.gov
+    feed_url: https://www.state.gov/rss-feed/
+    language: en
+
+  - domain: un.org
+    feed_url: https://news.un.org/feed/subscribe/en/news/all/rss.xml
+    language: en
+
+  - domain: reuters.com
+    feed_url: https://feeds.reuters.com/reuters/worldNews
+    language: en
+
+  - domain: apnews.com
+    feed_url: https://apnews.com/hub/ap-top-news?output=rss
+    language: en
+
+  - domain: bbc.com
+    feed_url: https://feeds.bbci.co.uk/news/world/rss.xml
+    language: en
+
+  - domain: aljazeera.com
+    feed_url: https://www.aljazeera.com/xml/rss/all.xml
+    language: en
+
+  - domain: xinhuanet.com
+    feed_url: https://english.news.cn/rss/world.xml
+    language: en
