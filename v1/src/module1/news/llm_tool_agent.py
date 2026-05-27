@@ -4,6 +4,7 @@ from __future__ import annotations
 # 这个文件实现模块一的 LLM 新闻工具 Agent，负责编排搜索、抓取和最终新闻来源筛选。
 import json
 import re
+from collections import defaultdict
 from typing import Any
 
 from module1.models import (
@@ -18,6 +19,7 @@ from module1.news.agent import _document_from_candidate
 from module1.news.block_builder import NewsBlockBuilder
 from module1.news.deduper import dedupe_source_documents
 from module1.news.source_registry import SourceEntry, SourceRegistry
+from module1.news.text_cleaner import first_meaningful_excerpt
 
 
 class LLMNewsToolAgent:
@@ -92,7 +94,7 @@ class LLMNewsToolAgent:
                         },
                     )
                     if self.documents_by_url:
-                        final_payload = {}
+                        final_payload = None
                         break
                     raise
             emit(
@@ -130,7 +132,7 @@ class LLMNewsToolAgent:
                 documents=list(self.documents_by_url.values()),
             )
 
-        return self._build_result(task, final_payload or {}, emit)
+        return self._build_result(task, final_payload or {}, emit, agent_client=agent_client)
 
     def _execute_tool(self, call: dict, task: TimelineCollectionTask, emit) -> dict:
         tool = str(call.get("tool", ""))
@@ -235,7 +237,14 @@ class LLMNewsToolAgent:
             "error": fetched.error,
         }
 
-    def _build_result(self, task: TimelineCollectionTask, final_payload: dict[str, Any], emit) -> NewsAgentResult:
+    def _build_result(
+        self,
+        task: TimelineCollectionTask,
+        final_payload: dict[str, Any],
+        emit,
+        *,
+        agent_client: object,
+    ) -> NewsAgentResult:
         accepted_urls = [str(url) for url in final_payload.get("accepted_urls", []) if str(url).strip()]
         if not accepted_urls:
             accepted_urls = [document.url for document in self.documents_by_url.values() if document.fetch_status == "success"]
@@ -255,7 +264,13 @@ class LLMNewsToolAgent:
         documents = dedupe_source_documents(documents)
         source_ids = {document.source_id for document in documents}
         source_texts = {key: value for key, value in self.source_texts.items() if key in source_ids}
-        news_blocks = _blocks_from_final(task, final_payload, documents)
+        news_blocks = _blocks_from_llm_content(
+            task,
+            documents,
+            source_texts,
+            agent_client=agent_client,
+            emit=emit,
+        )
         if not news_blocks:
             news_blocks = NewsBlockBuilder().build_news_blocks(task, documents, source_texts)
         suggestions = _timeline_suggestions_from_final(task, final_payload, documents)
@@ -374,7 +389,7 @@ def _force_final_decision(
     emit(
         "llm_agent_force_final",
         "started",
-        "LLM 工具轮数已用尽，要求模型只返回最终 JSON",
+        "LLM 工具轮数已用尽，要求模型只返回轻量最终选择",
         {"documents": compact_documents},
     )
     final_messages = [
@@ -385,6 +400,7 @@ def _force_final_decision(
                 "Tool budget is exhausted. Do not call tools. Return ONLY valid JSON with this schema: "
                 '{"thought":"final selection","tool_calls":[],"final":{"accepted_urls":[],"news_blocks":[],"timeline_update_suggestions":[]}}. '
                 "Only include URLs whose fetch_status is success. Exclude blocked, failed, metadata_only, topic pages, and low-quality pages. "
+                "Keep news_blocks and timeline_update_suggestions as empty arrays; Python will assemble structured blocks later. "
                 "Fetched document inventory:\n"
                 + json.dumps(compact_documents, ensure_ascii=False, indent=2)
             ),
@@ -424,6 +440,280 @@ def _force_final_decision(
         {"decision": decision},
     )
     return {}
+
+
+def _blocks_from_llm_content(
+    task: TimelineCollectionTask,
+    documents: list[SourceDocument],
+    source_texts: dict[str, str],
+    *,
+    agent_client: object,
+    emit,
+) -> list[NewsBlock]:
+    """让 LLM 只负责短文案，引用关系、source_refs 和层级统计都由程序生成。"""
+
+    grouped: dict[str, list[SourceDocument]] = defaultdict(list)
+    for document in documents:
+        if document.fetch_status != "success":
+            continue
+        timeline_item_id = document.timeline_item_id or _default_timeline_item_id(task)
+        grouped[timeline_item_id].append(document)
+
+    blocks: list[NewsBlock] = []
+    for index, (timeline_item_id, docs) in enumerate(sorted(grouped.items()), start=1):
+        compact_sources = _compact_sources_for_block(docs, source_texts)
+        if not compact_sources:
+            continue
+
+        emit(
+            "llm_agent_block_content",
+            "started",
+            "让 LLM 只生成新闻块短文案，程序负责最终 JSON 结构",
+            {"timeline_item_id": timeline_item_id, "source_count": len(compact_sources)},
+        )
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You write concise news block text from provided fetched sources. "
+                    "Return ONLY one compact valid JSON object. Do not use markdown. "
+                    "Do not output URLs. Use only source_id values from the input."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Generate concise content for one news block. Python will assemble the final object, "
+                    "so you must not select URLs or build the full final JSON. "
+                    "Return this schema only: "
+                    '{"title":"","summary":"","reported_facts":[{"source_id":"","text":""}],'
+                    '"source_summaries":[{"source_id":"","summary":""}],'
+                    '"source_differences":[{"topic":"","description":""}]}. '
+                    "Keep summary under 180 words, facts under 8 items, and source summaries under 1 sentence each.\n"
+                    "Input:\n"
+                    + json.dumps(
+                        {
+                            "event_query": task.event_query,
+                            "confirmed_event": task.confirmed_event,
+                            "timeline_item_id": timeline_item_id,
+                            "baseline_title": _timeline_title_for(task, timeline_item_id),
+                            "sources": compact_sources,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                ),
+            },
+        ]
+        try:
+            raw = agent_client.chat_text(messages)
+            content_payload = _parse_json_object(raw)
+        except Exception as exc:
+            emit(
+                "llm_agent_block_content",
+                "warning",
+                "LLM 短文案 JSON 生成失败，回退到程序摘要",
+                {"error": f"{exc.__class__.__name__}: {exc}", "timeline_item_id": timeline_item_id},
+            )
+            continue
+
+        block = _block_from_content_payload(
+            task=task,
+            timeline_item_id=timeline_item_id,
+            index=index,
+            documents=docs,
+            source_texts=source_texts,
+            payload=content_payload,
+        )
+        if block:
+            blocks.append(block)
+            emit(
+                "llm_agent_block_content",
+                "completed",
+                "LLM 短文案已通过程序校验并组装成 NewsBlock",
+                {"timeline_item_id": timeline_item_id, "news_block_id": block.news_block_id},
+            )
+
+    return blocks
+
+
+def _compact_sources_for_block(
+    documents: list[SourceDocument],
+    source_texts: dict[str, str],
+) -> list[dict[str, str | None]]:
+    """把长正文压成 source_id + 摘要片段，避免把整篇网页再交给 LLM 生成长 JSON。"""
+
+    compact_sources: list[dict[str, str | None]] = []
+    for document in documents[:12]:
+        excerpt = first_meaningful_excerpt(source_texts.get(document.source_id, ""), limit=900)
+        compact_sources.append(
+            {
+                "source_id": document.source_id,
+                "title": document.title,
+                "publisher": document.publisher,
+                "published_at": document.published_at,
+                "excerpt": excerpt or document.title or "",
+            }
+        )
+    return compact_sources
+
+
+def _block_from_content_payload(
+    *,
+    task: TimelineCollectionTask,
+    timeline_item_id: str,
+    index: int,
+    documents: list[SourceDocument],
+    source_texts: dict[str, str],
+    payload: dict[str, Any],
+) -> NewsBlock | None:
+    """校验 LLM 的短文案输出，并由程序补齐稳定的结构字段。"""
+
+    source_refs = [document.source_id for document in documents]
+    source_ids = set(source_refs)
+    title = _short_text(payload.get("title"), limit=180) or documents[0].title or "News update"
+    summary = _short_text(payload.get("summary"), limit=1400)
+    source_summaries = _source_bound_items(
+        payload.get("source_summaries"),
+        source_ids=source_ids,
+        text_key="summary",
+        limit=700,
+    )
+    reported_facts = _source_bound_items(
+        payload.get("reported_facts"),
+        source_ids=source_ids,
+        text_key="text",
+        limit=700,
+    )
+
+    # 如果短文案缺字段，程序用已清洗正文兜底，仍然不让 LLM 生成完整 final JSON。
+    if not source_summaries:
+        source_summaries = _fallback_source_items(documents, source_texts, text_key="summary")
+    if not reported_facts:
+        reported_facts = _fallback_source_items(documents, source_texts, text_key="text")
+    if not summary:
+        summary = _summary_from_items(source_summaries) or _timeline_title_for(task, timeline_item_id)
+
+    if not source_refs:
+        return None
+
+    return NewsBlock(
+        news_block_id=f"nb_{index:03d}",
+        event_id=task.event_id,
+        timeline_item_id=timeline_item_id,
+        title=title,
+        summary=summary,
+        event_time=_event_time_for(task, timeline_item_id),
+        reported_facts=reported_facts,
+        source_summaries=source_summaries,
+        source_differences=_source_differences(payload.get("source_differences")),
+        source_refs=source_refs,
+        source_tier_summary=_tier_summary(documents, source_refs),
+    )
+
+
+def _source_bound_items(
+    items: Any,
+    *,
+    source_ids: set[str],
+    text_key: str,
+    limit: int,
+) -> list[dict[str, str]]:
+    """只保留能映射到已接受 source_id 的 LLM 文案，防止幻觉来源进入结果。"""
+
+    if not isinstance(items, list):
+        return []
+
+    validated: list[dict[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        source_id = _short_text(item.get("source_id"), limit=80)
+        text = _short_text(item.get(text_key) or item.get("text") or item.get("summary"), limit=limit)
+        if source_id not in source_ids or not text:
+            continue
+        validated.append({"source_id": source_id, text_key: text})
+    return validated
+
+
+def _fallback_source_items(
+    documents: list[SourceDocument],
+    source_texts: dict[str, str],
+    *,
+    text_key: str,
+) -> list[dict[str, str]]:
+    """当短文案缺字段时，从清洗正文中抽取可读片段补齐每个来源的说明。"""
+
+    items: list[dict[str, str]] = []
+    for document in documents:
+        text = first_meaningful_excerpt(source_texts.get(document.source_id, ""), limit=520) or document.title or ""
+        if text:
+            items.append({"source_id": document.source_id, text_key: text})
+    return items
+
+
+def _source_differences(items: Any) -> list[dict[str, str]]:
+    """把 LLM 给出的来源差异压成短字段，不接受任意长文本。"""
+
+    if not isinstance(items, list):
+        return []
+
+    differences: list[dict[str, str]] = []
+    for item in items:
+        if isinstance(item, str):
+            description = _short_text(item, limit=700)
+            if description:
+                differences.append({"description": description})
+            continue
+        if not isinstance(item, dict):
+            continue
+        topic = _short_text(item.get("topic"), limit=140)
+        description = _short_text(
+            item.get("description") or item.get("text") or item.get("difference") or item.get("summary"),
+            limit=700,
+        )
+        if not description:
+            continue
+        difference = {"description": description}
+        if topic:
+            difference["topic"] = topic
+        differences.append(difference)
+    return differences
+
+
+def _summary_from_items(items: list[dict[str, str]]) -> str:
+    """用程序兜底摘要时只拼接短句，避免再混入大段导航噪声。"""
+
+    return " ".join(item.get("summary") or item.get("text") or "" for item in items if item)[:900].strip()
+
+
+def _short_text(value: Any, *, limit: int) -> str:
+    """统一压缩 LLM 文案字段，保持最终 JSON 可读且长度可控。"""
+
+    if not isinstance(value, str):
+        return ""
+    text = re.sub(r"\s+", " ", value).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
+
+
+def _timeline_title_for(task: TimelineCollectionTask, timeline_item_id: str) -> str:
+    """根据 timeline_item_id 找到基准时间线标题，用于摘要兜底。"""
+
+    for item in task.baseline_timeline:
+        if item.timeline_item_id == timeline_item_id:
+            return item.title
+    return task.confirmed_event or task.event_query
+
+
+def _event_time_for(task: TimelineCollectionTask, timeline_item_id: str) -> str | None:
+    """根据 timeline_item_id 找到基准时间线日期，用于 NewsBlock.event_time。"""
+
+    for item in task.baseline_timeline:
+        if item.timeline_item_id == timeline_item_id:
+            return item.start_date
+    return None
 
 
 def _empty_result_reason(*, candidate_count: int, documents: list[SourceDocument]) -> str:
@@ -486,14 +776,7 @@ or, when enough pages have been fetched:
   "tool_calls": [],
   "final": {
     "accepted_urls": ["https://..."],
-    "news_blocks": [
-      {
-        "title": "short news block title",
-        "summary": "what the sources report",
-        "source_urls": ["https://..."],
-        "reported_facts": [{"text": "reported fact", "source_url": "https://..."}]
-      }
-    ],
+    "news_blocks": [],
     "timeline_update_suggestions": []
   }
 }
@@ -507,6 +790,7 @@ Rules:
 - Fetch promising URLs before accepting them.
 - Unknown domains are rejected by the executor; do not try to bypass the source registry.
 - Only accept URLs whose fetch_status is "success"; blocked, failed, or metadata_only pages are diagnostics, not source evidence.
+- Keep final compact: only choose accepted_urls. Leave news_blocks and timeline_update_suggestions empty; Python will assemble the final structured news blocks from fetched source_id records.
 """.strip()
 
 
@@ -579,37 +863,6 @@ def _candidate_from_url(url: str, source_meta: SourceEntry) -> CandidateSource:
         discovery_method="llm_direct_url",
         collection_pass="discovery_pass",
     )
-
-
-def _blocks_from_final(
-    task: TimelineCollectionTask,
-    final_payload: dict[str, Any],
-    documents: list[SourceDocument],
-) -> list[NewsBlock]:
-    url_to_source_id = {_url_key(document.url): document.source_id for document in documents}
-    blocks: list[NewsBlock] = []
-    for index, item in enumerate(final_payload.get("news_blocks", []) or [], start=1):
-        if not isinstance(item, dict):
-            continue
-        source_urls = [str(url) for url in item.get("source_urls", [])]
-        source_refs = [url_to_source_id[_url_key(url)] for url in source_urls if _url_key(url) in url_to_source_id]
-        if not source_refs:
-            continue
-        blocks.append(
-            NewsBlock(
-                news_block_id=f"nb_{index:03d}",
-                event_id=task.event_id,
-                timeline_item_id=_default_timeline_item_id(task),
-                title=str(item.get("title") or "LLM generated news block"),
-                summary=str(item.get("summary") or ""),
-                reported_facts=item.get("reported_facts") if isinstance(item.get("reported_facts"), list) else [],
-                source_summaries=[],
-                source_differences=[],
-                source_refs=source_refs,
-                source_tier_summary=_tier_summary(documents, source_refs),
-            )
-        )
-    return blocks
 
 
 def _timeline_suggestions_from_final(

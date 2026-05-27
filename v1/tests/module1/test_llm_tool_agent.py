@@ -51,18 +51,21 @@ def test_llm_tool_agent_searches_fetches_and_accepts_sources():
         text_responses=[
             '{"thought":"search English aliases","tool_calls":[{"tool":"web_search","args":{"queries":["site:aljazeera.com US Iran conflict latest"]}}],"final":null}',
             f'{{"thought":"fetch candidate","tool_calls":[{{"tool":"fetch_url","args":{{"url":"{url}"}}}}],"final":null}}',
-            f'{{"thought":"done","tool_calls":[],"final":{{"accepted_urls":["{url}"],"news_blocks":[{{"title":"US-Iran tensions","summary":"Sources report renewed US-Iran tensions.","source_urls":["{url}"],"reported_facts":[{{"text":"US and Iran tensions rose.","source_url":"{url}"}}]}}],"timeline_update_suggestions":[]}}}}',
+            f'{{"thought":"done","tool_calls":[],"final":{{"accepted_urls":["{url}"],"news_blocks":[],"timeline_update_suggestions":[]}}}}',
+            '{"title":"US-Iran tensions","summary":"Sources report renewed US-Iran tensions.","reported_facts":[{"source_id":"src_606911079929","text":"US and Iran tensions rose."}],"source_summaries":[{"source_id":"src_606911079929","summary":"Al Jazeera reports renewed US-Iran tensions."}],"source_differences":[]}',
         ]
     )
     agent = LLMNewsToolAgent(source_registry=registry, search_provider=search_provider, fetcher=fetcher)
 
     result = agent.run(task, agent_client=client)
 
-    assert len(client.calls) == 3
+    assert len(client.calls) == 4
     assert len(result.source_documents) == 1
     assert result.source_documents[0].url == url
     assert len(result.news_blocks) == 1
     assert result.news_blocks[0].source_refs == [result.source_documents[0].source_id]
+    assert result.news_blocks[0].summary == "Sources report renewed US-Iran tensions."
+    assert "Python will assemble the final object" in client.calls[-1][-1]["content"]
 
 
 def test_llm_tool_agent_records_tool_failure_without_crashing():
@@ -272,7 +275,8 @@ def test_llm_tool_agent_repairs_invalid_final_json_before_fallback():
             '{"thought":"search","tool_calls":[{"tool":"web_search","args":{"queries":["site:aljazeera.com US Iran conflict latest"]}}],"final":null}',
             f'{{"thought":"fetch","tool_calls":[{{"tool":"fetch_url","args":{{"url":"{url}"}}}}],"final":null}}',
             f'{{"thought":"done","tool_calls":[],"final":{{"accepted_urls":["{url}"] "news_blocks":[],"timeline_update_suggestions":[]}}}}',
-            f'{{"thought":"done","tool_calls":[],"final":{{"accepted_urls":["{url}"],"news_blocks":[{{"title":"US-Iran tensions","summary":"Repaired summary.","source_urls":["{url}"],"reported_facts":[{{"text":"Repaired fact.","source_url":"{url}"}}]}}],"timeline_update_suggestions":[]}}}}',
+            f'{{"thought":"done","tool_calls":[],"final":{{"accepted_urls":["{url}"],"news_blocks":[],"timeline_update_suggestions":[]}}}}',
+            '{"title":"US-Iran tensions","summary":"Repaired summary.","reported_facts":[{"source_id":"src_606911079929","text":"Repaired fact."}],"source_summaries":[{"source_id":"src_606911079929","summary":"Repaired source summary."}],"source_differences":[]}',
         ]
     )
     events = []
@@ -280,10 +284,10 @@ def test_llm_tool_agent_repairs_invalid_final_json_before_fallback():
 
     result = agent.run(task, agent_client=client, emit=lambda *args: events.append(args))
 
-    assert len(client.calls) == 4
+    assert len(client.calls) == 5
     assert len(result.source_documents) == 1
     assert result.news_blocks[0].summary == "Repaired summary."
-    assert "Return ONLY one repaired JSON object" in client.calls[-1][-1]["content"]
+    assert any("Return ONLY one repaired JSON object" in call[-1]["content"] for call in client.calls)
     assert any(event[0] == "llm_agent_repair" and event[1] == "started" for event in events)
     assert any(event[0] == "llm_agent_repair" and event[1] == "completed" for event in events)
 
@@ -373,6 +377,7 @@ def test_llm_tool_agent_forces_final_when_tool_budget_is_exhausted():
             '{"thought":"search","tool_calls":[{"tool":"web_search","args":{"queries":["site:aljazeera.com US Iran conflict"]}}],"final":null}',
             f'{{"thought":"fetch","tool_calls":[{{"tool":"fetch_url","args":{{"url":"{url}"}}}}],"final":null}}',
             f'{{"thought":"forced final","tool_calls":[],"final":{{"accepted_urls":["{url}"],"news_blocks":[],"timeline_update_suggestions":[]}}}}',
+            '{"title":"US-Iran tensions","summary":"Forced final summary.","reported_facts":[{"source_id":"src_606911079929","text":"Forced final fact."}],"source_summaries":[{"source_id":"src_606911079929","summary":"Forced final source summary."}],"source_differences":[]}',
         ]
     )
     events = []
@@ -385,7 +390,8 @@ def test_llm_tool_agent_forces_final_when_tool_budget_is_exhausted():
 
     result = agent.run(task, agent_client=client, emit=lambda *args: events.append(args))
 
-    assert len(client.calls) == 3
+    assert len(client.calls) == 4
     assert len(result.source_documents) == 1
+    assert result.news_blocks[0].summary == "Forced final summary."
     assert any(event[0] == "llm_agent_force_final" and event[1] == "started" for event in events)
     assert any(event[0] == "llm_agent_force_final" and event[1] == "completed" for event in events)
