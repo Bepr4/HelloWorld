@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from module1.intake.coordinator import Coordinator
-from module1.models import NewsAgentResult, SourceDocument, TimelineItem
+from module1.models import NewsAgentResult, SourceDocument, SourceTextArtifact, TimelineItem
 from module1.storage import StorageWriter
 
 
@@ -43,7 +43,17 @@ def test_storage_writes_event_package_without_context_map():
         collection_pass="timeline_pass",
         fetch_status="success",
     )
-    news_result = NewsAgentResult(source_documents=[source], source_texts={"src_001": "source body"})
+    news_result = NewsAgentResult(
+        source_documents=[source],
+        source_texts={"src_001": "source body"},
+        source_text_artifacts={
+            "src_001": SourceTextArtifact(
+                raw_markdown="raw markdown body",
+                fit_markdown="fit markdown body",
+                cleaned_text="source body",
+            )
+        },
+    )
     storage = StorageWriter(output_root / "module1")
 
     package = storage.build_event_info_package(
@@ -53,13 +63,29 @@ def test_storage_writes_event_package_without_context_map():
         news_result=news_result,
         finance_result={"financial_evidence": [], "market_trend_spans": [], "status": "not_implemented"},
     )
-    event_dir = storage.save_event_package(package, source_texts=news_result.source_texts)
+    event_dir = storage.save_event_package(
+        package,
+        source_texts=news_result.source_texts,
+        source_text_artifacts=news_result.source_text_artifacts,
+    )
 
     assert (event_dir / "event_info_package.json").exists()
     assert (event_dir / "timeline_collection_task.json").exists()
     assert (event_dir / "baseline_timeline.json").exists()
     assert (event_dir / "sources" / "src_001.txt").read_text(encoding="utf-8") == "source body"
+    assert (event_dir / "sources" / "src_001" / "raw_markdown.md").read_text(encoding="utf-8") == "raw markdown body"
+    assert (event_dir / "sources" / "src_001" / "fit_markdown.md").read_text(encoding="utf-8") == "fit markdown body"
+    assert (event_dir / "sources" / "src_001" / "cleaned_text.txt").read_text(encoding="utf-8") == "source body"
 
     saved = json.loads((event_dir / "event_info_package.json").read_text(encoding="utf-8"))
     assert "timeline_items" not in saved
     assert "context_map" not in saved
+    saved_source = saved["source_documents"][0]
+    raw_text_path = saved_source["raw_text_path"].replace("\\", "/")
+    raw_markdown_path = saved_source["raw_markdown_path"].replace("\\", "/")
+    fit_markdown_path = saved_source["fit_markdown_path"].replace("\\", "/")
+    cleaned_text_path = saved_source["cleaned_text_path"].replace("\\", "/")
+    assert raw_text_path.endswith("src_001.txt")
+    assert raw_markdown_path.endswith("src_001/raw_markdown.md")
+    assert fit_markdown_path.endswith("src_001/fit_markdown.md")
+    assert cleaned_text_path.endswith("src_001/cleaned_text.txt")

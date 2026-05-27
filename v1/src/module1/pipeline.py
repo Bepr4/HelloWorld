@@ -93,7 +93,11 @@ def run_module1(
         news_result=news_result,
         finance_result=finance_result,
     )
-    storage.save_event_package(package, source_texts=news_result.source_texts)
+    storage.save_event_package(
+        package,
+        source_texts=news_result.source_texts,
+        source_text_artifacts=news_result.source_text_artifacts,
+    )
     return package
 
 

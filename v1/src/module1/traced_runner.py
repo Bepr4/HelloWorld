@@ -16,10 +16,12 @@ from module1.models import (
     EventScopeConfirmation,
     NewsAgentResult,
     SourceDocument,
+    SourceTextArtifact,
     TimelineCollectionTask,
     TimelineUpdateSuggestion,
 )
 from module1.news.agent import (
+    _artifact_from_fetched,
     _dedupe_candidates,
     _dedupe_suggestions,
     _document_from_candidate,
@@ -150,7 +152,11 @@ def run_module1_traced(
         news_result=news_result,
         finance_result=finance_result,
     )
-    output_dir = storage.save_event_package(package, source_texts=news_result.source_texts)
+    output_dir = storage.save_event_package(
+        package,
+        source_texts=news_result.source_texts,
+        source_text_artifacts=news_result.source_text_artifacts,
+    )
     emit(
         "storage",
         "completed",
@@ -224,6 +230,7 @@ def _build_news_result_with_trace(
     block_builder = NewsBlockBuilder()
     source_documents: list[SourceDocument] = []
     source_texts: dict[str, str] = {}
+    source_text_artifacts: dict[str, SourceTextArtifact] = {}
     suggestions: list[TimelineUpdateSuggestion] = []
 
     for index, candidate in enumerate(candidates, start=1):
@@ -246,6 +253,9 @@ def _build_news_result_with_trace(
                 "status": fetched.status,
                 "title": fetched.title or candidate.title,
                 "text_length": len(fetched.text or ""),
+                "raw_markdown_length": len(fetched.raw_markdown or ""),
+                "fit_markdown_length": len(fetched.fit_markdown or ""),
+                "cleaned_text_length": len(fetched.cleaned_text or fetched.text or ""),
                 "error": fetched.error,
             },
         )
@@ -271,6 +281,7 @@ def _build_news_result_with_trace(
         source_documents.append(document)
         if fetched.status == "success" and fetched.text:
             source_texts[document.source_id] = fetched.text
+            source_text_artifacts[document.source_id] = _artifact_from_fetched(fetched)
         emit("accepted_source", "completed", document.title or document.url, document.model_dump(mode="json"))
 
         if decision.needs_timeline_update_suggestion:
@@ -281,6 +292,7 @@ def _build_news_result_with_trace(
     source_documents = dedupe_source_documents(source_documents)
     source_ids = {document.source_id for document in source_documents}
     source_texts = {key: value for key, value in source_texts.items() if key in source_ids}
+    source_text_artifacts = {key: value for key, value in source_text_artifacts.items() if key in source_ids}
     emit(
         "source_dedupe",
         "completed",
@@ -302,6 +314,7 @@ def _build_news_result_with_trace(
         news_blocks=news_blocks,
         timeline_update_suggestions=suggestions,
         source_texts=source_texts,
+        source_text_artifacts=source_text_artifacts,
     )
 
 

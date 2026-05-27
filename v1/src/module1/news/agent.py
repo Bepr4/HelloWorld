@@ -8,6 +8,7 @@ from module1.models import (
     FetchedPage,
     NewsAgentResult,
     SourceDocument,
+    SourceTextArtifact,
     TimelineCollectionTask,
     TimelineUpdateSuggestion,
 )
@@ -51,6 +52,7 @@ class NewsAgent:
 
         source_documents: list[SourceDocument] = []
         source_texts: dict[str, str] = {}
+        source_text_artifacts: dict[str, SourceTextArtifact] = {}
         suggestions: list[TimelineUpdateSuggestion] = []
 
         for candidate in _dedupe_candidates(candidates):
@@ -71,6 +73,7 @@ class NewsAgent:
             source_documents.append(document)
             if fetched.status == "success" and fetched.text:
                 source_texts[document.source_id] = fetched.text
+                source_text_artifacts[document.source_id] = _artifact_from_fetched(fetched)
 
             if decision.needs_timeline_update_suggestion:
                 suggestions.append(_suggestion_from_document(task, document, text))
@@ -78,6 +81,7 @@ class NewsAgent:
         source_documents = dedupe_source_documents(source_documents)
         source_ids = {document.source_id for document in source_documents}
         source_texts = {key: value for key, value in source_texts.items() if key in source_ids}
+        source_text_artifacts = {key: value for key, value in source_text_artifacts.items() if key in source_ids}
         news_blocks = self.block_builder.build_news_blocks(task, source_documents, source_texts)
         suggestions = _dedupe_suggestions(suggestions)
 
@@ -86,6 +90,7 @@ class NewsAgent:
             news_blocks=news_blocks,
             timeline_update_suggestions=suggestions,
             source_texts=source_texts,
+            source_text_artifacts=source_text_artifacts,
         )
 
 
@@ -111,6 +116,17 @@ def _document_from_candidate(event_id: str, candidate: CandidateSource, fetched:
         content_hash=text_hash,
         fetch_status=fetched.status,
         fetch_error=fetched.error,
+    )
+
+
+def _artifact_from_fetched(fetched: FetchedPage) -> SourceTextArtifact:
+    """把抓取结果拆成可落盘对比的三层正文，旧 text 字段仍视为最终清洗正文。"""
+
+    cleaned_text = fetched.cleaned_text or fetched.text
+    return SourceTextArtifact(
+        raw_markdown=fetched.raw_markdown,
+        fit_markdown=fetched.fit_markdown,
+        cleaned_text=cleaned_text,
     )
 
 

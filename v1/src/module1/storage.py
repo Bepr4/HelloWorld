@@ -4,7 +4,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from module1.models import EventInfoPackage, EventScopeConfirmation, NewsAgentResult, TimelineCollectionTask, TimelineItem
+from module1.models import (
+    EventInfoPackage,
+    EventScopeConfirmation,
+    NewsAgentResult,
+    SourceTextArtifact,
+    TimelineCollectionTask,
+    TimelineItem,
+)
 
 
 class StorageWriter:
@@ -46,10 +53,12 @@ class StorageWriter:
         package: EventInfoPackage,
         *,
         source_texts: dict[str, str] | None = None,
+        source_text_artifacts: dict[str, SourceTextArtifact] | None = None,
     ) -> Path:
         """将事件材料包落盘。
 
-        成功抓到正文的来源会写入 sources/<source_id>.txt，并把路径回填到 SourceDocument。
+        成功抓到正文的来源会继续写入旧的 sources/<source_id>.txt；
+        同时写出 raw_markdown / fit_markdown / cleaned_text 三份对比文件，方便验证清洗效果。
         """
 
         event_dir = self.storage_root / "events" / package.event_id
@@ -57,12 +66,28 @@ class StorageWriter:
         sources_dir.mkdir(parents=True, exist_ok=True)
 
         source_texts = source_texts or {}
+        source_text_artifacts = source_text_artifacts or {}
         for document in package.source_documents:
-            if document.source_id not in source_texts:
+            artifact = _artifact_for_source(
+                source_text_artifacts.get(document.source_id),
+                cleaned_text=source_texts.get(document.source_id),
+            )
+            if artifact is None:
                 continue
-            source_path = sources_dir / f"{document.source_id}.txt"
-            source_path.write_text(source_texts[document.source_id], encoding="utf-8")
-            document.raw_text_path = str(source_path)
+
+            # 旧路径暂时保留为 cleaned_text 的兼容副本，后面清洗稳定后可以删除。
+            if artifact.cleaned_text is not None:
+                source_path = sources_dir / f"{document.source_id}.txt"
+                source_path.write_text(artifact.cleaned_text, encoding="utf-8")
+                document.raw_text_path = str(source_path)
+
+            source_dir = sources_dir / document.source_id
+            raw_path = _write_optional_text(source_dir / "raw_markdown.md", artifact.raw_markdown)
+            fit_path = _write_optional_text(source_dir / "fit_markdown.md", artifact.fit_markdown)
+            cleaned_path = _write_optional_text(source_dir / "cleaned_text.txt", artifact.cleaned_text)
+            document.raw_markdown_path = str(raw_path) if raw_path else None
+            document.fit_markdown_path = str(fit_path) if fit_path else None
+            document.cleaned_text_path = str(cleaned_path) if cleaned_path else None
 
         self._write_json(event_dir / "event_info_package.json", package.model_dump(mode="json"))
         self._write_json(
@@ -104,3 +129,29 @@ def _build_evidence_refs(news_result: NewsAgentResult) -> list[dict]:
                 }
             )
     return refs
+
+
+def _artifact_for_source(
+    artifact: SourceTextArtifact | None,
+    *,
+    cleaned_text: str | None,
+) -> SourceTextArtifact | None:
+    """兼容旧调用：没有三层 artifact 时，用 source_texts 里的正文补 cleaned_text。"""
+
+    if artifact is None and cleaned_text is None:
+        return None
+    if artifact is None:
+        return SourceTextArtifact(cleaned_text=cleaned_text)
+    if artifact.cleaned_text is None and cleaned_text is not None:
+        return artifact.model_copy(update={"cleaned_text": cleaned_text})
+    return artifact
+
+
+def _write_optional_text(path: Path, text: str | None) -> Path | None:
+    """有内容才写文件，避免为缺失的 Crawl4AI 层制造空对比文件。"""
+
+    if text is None:
+        return None
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path

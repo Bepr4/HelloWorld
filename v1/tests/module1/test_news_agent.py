@@ -39,6 +39,9 @@ def test_news_agent_collects_blocks_and_timeline_suggestions():
                 url="https://www.reuters.com/world/soleimani-jan-3",
                 title="Soleimani conflict strike on 2020-01-03",
                 text="Soleimani conflict strike on 2020-01-03 involved US and Iran forces.",
+                raw_markdown="raw Reuters markdown",
+                fit_markdown="fit Reuters markdown",
+                cleaned_text="Soleimani conflict strike on 2020-01-03 involved US and Iran forces.",
                 published_at="2020-01-03",
                 status="success",
             ),
@@ -85,6 +88,11 @@ def test_news_agent_collects_blocks_and_timeline_suggestions():
     assert result.news_blocks[0].reported_facts
     assert result.timeline_update_suggestions
     assert result.timeline_update_suggestions[0].suggested_start_date == "2020-01-04"
+    reuters_doc = next(doc for doc in result.source_documents if doc.publisher == "reuters.com")
+    reuters_artifact = result.source_text_artifacts[reuters_doc.source_id]
+    assert reuters_artifact.raw_markdown == "raw Reuters markdown"
+    assert reuters_artifact.fit_markdown == "fit Reuters markdown"
+    assert reuters_artifact.cleaned_text == "Soleimani conflict strike on 2020-01-03 involved US and Iran forces."
 
 
 def test_news_agent_passes_event_query_to_fetcher():

@@ -89,6 +89,9 @@ class SourceDocument(Module1Model):
     collection_pass: Literal["timeline_pass", "discovery_pass"] = "timeline_pass"
     content_hash: str | None = None
     raw_text_path: str | None = None
+    raw_markdown_path: str | None = None
+    fit_markdown_path: str | None = None
+    cleaned_text_path: str | None = None
     fetch_status: Literal["success", "metadata_only", "blocked", "failed"]
     fetch_error: str | None = None
     relevance_score: float | None = None
@@ -195,14 +198,26 @@ class FetchedPage(Module1Model):
     """Fetcher 抓取后的网页内容。
 
     metadata_only 和 failed 可以保留为线索，但不能用来生成 reported_facts。
+    text 是兼容旧链路的最终可用正文；raw_markdown / fit_markdown / cleaned_text 用于对比抓取和清洗效果。
     """
 
     url: str
     title: str | None = None
     text: str | None = None
+    raw_markdown: str | None = None
+    fit_markdown: str | None = None
+    cleaned_text: str | None = None
     published_at: str | None = None
     status: Literal["success", "metadata_only", "blocked", "failed"]
     error: str | None = None
+
+
+class SourceTextArtifact(Module1Model):
+    """单个来源的三层正文产物，方便人工对比 Crawl4AI 抽取、BM25/Pruning 和最终清洗结果。"""
+
+    raw_markdown: str | None = None
+    fit_markdown: str | None = None
+    cleaned_text: str | None = None
 
 
 class RelevanceDecision(Module1Model):
@@ -224,3 +239,4 @@ class NewsAgentResult(Module1Model):
     news_blocks: list[NewsBlock] = Field(default_factory=list)
     timeline_update_suggestions: list[TimelineUpdateSuggestion] = Field(default_factory=list)
     source_texts: dict[str, str] = Field(default_factory=dict)
+    source_text_artifacts: dict[str, SourceTextArtifact] = Field(default_factory=dict)

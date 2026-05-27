@@ -59,6 +59,45 @@ def test_crawl4ai_fetcher_maps_markdown_result_to_fetched_page():
     assert page.title == "Reuters title"
     assert page.published_at == "2026-01-01T00:00:00Z"
     assert page.text == article_text
+    assert page.raw_markdown == "Navigation that should not be preferred."
+    assert page.fit_markdown == article_text
+    assert page.cleaned_text == article_text
+
+
+def test_crawl4ai_fetcher_preserves_fit_markdown_and_cleaned_text_separately():
+    raw_markdown = "Navigation and unrelated page chrome before the article."
+    fit_markdown = """
+Diplomats said the latest talks were focused on protecting civilians and keeping channels open after a week of strikes and warnings across the region, while military officials reviewed reports from several front-line areas and briefed allied governments about risks to energy infrastructure and shipping routes.
+
+Officials added that allied governments were comparing battlefield reports, sanctions options, and possible diplomatic guarantees before another round of meetings, with negotiators trying to preserve a fragile channel for emergency communication and reduce the chance that local incidents could expand into a wider confrontation.
+
+List of IAB Vendors
+Use precise geolocation data
+Actively scan device characteristics for identification
+I Reject All
+Confirm My Choices
+"""
+
+    async def fake_crawler(url: str):
+        return SimpleNamespace(
+            url=url,
+            success=True,
+            markdown=SimpleNamespace(
+                fit_markdown=fit_markdown,
+                raw_markdown=raw_markdown,
+            ),
+            metadata={"title": "Reuters title"},
+        )
+
+    fetcher = Crawl4AIFetcher(crawler=fake_crawler)
+
+    page = fetcher.fetch("https://www.reuters.com/world/example")
+
+    assert page.status == "success"
+    assert page.raw_markdown == raw_markdown
+    assert "List of IAB Vendors" in page.fit_markdown
+    assert "List of IAB Vendors" not in page.cleaned_text
+    assert page.text == page.cleaned_text
 
 
 def test_crawl4ai_fetcher_passes_bm25_query_to_injected_crawler():

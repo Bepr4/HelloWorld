@@ -6,6 +6,7 @@ import inspect
 import os
 import threading
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import urllib.error
@@ -40,7 +41,7 @@ class UrlLibFetcher:
         text = strip_html(raw)
         title = extract_title(raw)
         if text:
-            return FetchedPage(url=url, title=title, text=text, status="success")
+            return FetchedPage(url=url, title=title, text=text, cleaned_text=text, status="success")
         return FetchedPage(url=url, title=title, status="metadata_only")
 
 
@@ -56,7 +57,7 @@ class InMemoryFetcher:
             return FetchedPage(url=url, status="failed", error="not found in in-memory fetcher")
         if isinstance(value, FetchedPage):
             return value
-        return FetchedPage(url=url, text=value, status="success")
+        return FetchedPage(url=url, text=value, cleaned_text=value, status="success")
 
 
 class Crawl4AIFetcher:
@@ -294,7 +295,8 @@ class Crawl4AIFetcher:
         metadata = getattr(result, "metadata", None) if isinstance(getattr(result, "metadata", None), dict) else {}
         title = _metadata_title(metadata) or _title_from_html(result)
         published_at = _metadata_published_at(metadata)
-        text = clean_article_text(_extract_crawl_text(result) or "")
+        text_layers = _extract_crawl_text_layers(result)
+        text = clean_article_text(text_layers.best_for_cleaning)
 
         if not getattr(result, "success", False):
             error = _crawl_error(result)
@@ -304,6 +306,9 @@ class Crawl4AIFetcher:
                 published_at=published_at,
                 status=_status_from_error(error),
                 error=error,
+                raw_markdown=text_layers.raw_markdown,
+                fit_markdown=text_layers.fit_markdown,
+                cleaned_text=text or None,
             )
 
         if _looks_blocked_text(text):
@@ -313,6 +318,9 @@ class Crawl4AIFetcher:
                 published_at=published_at,
                 status="blocked",
                 error="blocked_by_antibot: page content looks like an anti-bot challenge",
+                raw_markdown=text_layers.raw_markdown,
+                fit_markdown=text_layers.fit_markdown,
+                cleaned_text=text or None,
             )
 
         if text:
@@ -325,6 +333,9 @@ class Crawl4AIFetcher:
                     published_at=published_at,
                     status="metadata_only",
                     error=f"low_quality: {quality_issue}",
+                    raw_markdown=text_layers.raw_markdown,
+                    fit_markdown=text_layers.fit_markdown,
+                    cleaned_text=text,
                 )
             return FetchedPage(
                 url=final_url,
@@ -332,6 +343,9 @@ class Crawl4AIFetcher:
                 text=text,
                 published_at=published_at,
                 status="success",
+                raw_markdown=text_layers.raw_markdown,
+                fit_markdown=text_layers.fit_markdown,
+                cleaned_text=text,
             )
 
         return FetchedPage(
@@ -340,6 +354,9 @@ class Crawl4AIFetcher:
             published_at=published_at,
             status="metadata_only",
             error="crawl4ai returned no extractable text",
+            raw_markdown=text_layers.raw_markdown,
+            fit_markdown=text_layers.fit_markdown,
+            cleaned_text=None,
         )
 
 
@@ -505,33 +522,66 @@ def _looks_temporary_restricted_text(text: str) -> bool:
     )
 
 
-def _extract_crawl_text(result: Any) -> str | None:
-    markdown = getattr(result, "markdown", None)
-    candidates = []
-    if isinstance(markdown, str):
-        candidates.append(markdown)
-    elif markdown is not None:
-        candidates.extend(
-            [
-                getattr(markdown, "fit_markdown", None),
-                getattr(markdown, "raw_markdown", None),
-                getattr(markdown, "markdown_with_citations", None),
-            ]
-        )
+@dataclass(frozen=True)
+class _CrawlTextLayers:
+    """Crawl4AI 返回正文的三层视图：原始 markdown、过滤 markdown 和兜底文本。"""
 
-    candidates.extend(
-        [
-            getattr(result, "extracted_content", None),
-            strip_html(getattr(result, "cleaned_html", "") or ""),
-            strip_html(getattr(result, "html", "") or ""),
-        ]
+    raw_markdown: str | None = None
+    fit_markdown: str | None = None
+    fallback_text: str | None = None
+
+    @property
+    def best_for_cleaning(self) -> str:
+        """最终清洗优先基于 BM25/Pruning 后文本，缺失时再退回原始抽取正文。"""
+
+        return self.fit_markdown or self.raw_markdown or self.fallback_text or ""
+
+
+def _extract_crawl_text(result: Any) -> str | None:
+    return _extract_crawl_text_layers(result).best_for_cleaning or None
+
+
+def _extract_crawl_text_layers(result: Any) -> _CrawlTextLayers:
+    """拆出 Crawl4AI 的 raw_markdown / fit_markdown，并保留 HTML 抽取兜底文本。"""
+
+    markdown = getattr(result, "markdown", None)
+    raw_markdown = None
+    fit_markdown = None
+    if isinstance(markdown, str):
+        raw_markdown = _non_empty_text(markdown)
+        fit_markdown = raw_markdown
+    elif markdown is not None:
+        raw_markdown = _first_non_empty_text(
+            getattr(markdown, "raw_markdown", None),
+            getattr(markdown, "markdown_with_citations", None),
+        )
+        fit_markdown = _first_non_empty_text(getattr(markdown, "fit_markdown", None))
+
+    fallback_text = _first_non_empty_text(
+        getattr(result, "extracted_content", None),
+        strip_html(getattr(result, "cleaned_html", "") or ""),
+        strip_html(getattr(result, "html", "") or ""),
+    )
+    return _CrawlTextLayers(
+        raw_markdown=raw_markdown,
+        fit_markdown=fit_markdown,
+        fallback_text=fallback_text,
     )
 
+
+def _first_non_empty_text(*candidates: Any) -> str | None:
     for candidate in candidates:
-        if isinstance(candidate, str):
-            text = candidate.strip()
-            if text:
-                return text
+        text = _non_empty_text(candidate)
+        if text:
+            return text
+    return None
+
+
+def _non_empty_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            return text
     return None
 
 

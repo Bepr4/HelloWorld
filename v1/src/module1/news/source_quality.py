@@ -19,6 +19,12 @@ _NOISY_TEXT_MARKERS = (
     "you are now following",
     "updates from your news topics",
     "site search\nnews\nbusiness\ntechnology",
+    "list of iab vendors",
+    "consent leg.interest",
+    "i reject all",
+    "confirm my choices",
+    "actively scan device characteristics",
+    "use precise geolocation data",
 )
 
 

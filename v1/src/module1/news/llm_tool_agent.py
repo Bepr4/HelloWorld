@@ -12,10 +12,11 @@ from module1.models import (
     NewsAgentResult,
     NewsBlock,
     SourceDocument,
+    SourceTextArtifact,
     TimelineCollectionTask,
     TimelineUpdateSuggestion,
 )
-from module1.news.agent import _document_from_candidate
+from module1.news.agent import _artifact_from_fetched, _document_from_candidate
 from module1.news.block_builder import NewsBlockBuilder
 from module1.news.deduper import dedupe_source_documents
 from module1.news.fetch_context import build_fetch_query, fetch_with_query
@@ -43,6 +44,7 @@ class LLMNewsToolAgent:
         self.candidates_by_url: dict[str, CandidateSource] = {}
         self.documents_by_url: dict[str, SourceDocument] = {}
         self.source_texts: dict[str, str] = {}
+        self.source_text_artifacts: dict[str, SourceTextArtifact] = {}
 
     def run(self, task: TimelineCollectionTask, *, agent_client: object, emit=None) -> NewsAgentResult:
         """执行 LLM 工具循环，并返回新闻 Agent 结构化结果。"""
@@ -225,6 +227,7 @@ class LLMNewsToolAgent:
         self.documents_by_url[key] = document
         if fetched.status == "success" and fetched.text:
             self.source_texts[document.source_id] = fetched.text
+            self.source_text_artifacts[document.source_id] = _artifact_from_fetched(fetched)
 
         return {
             "ok": True,
@@ -236,6 +239,9 @@ class LLMNewsToolAgent:
             "fetch_status": document.fetch_status,
             "fetch_query": fetch_query,
             "published_at": document.published_at,
+            "raw_markdown_length": len(fetched.raw_markdown or ""),
+            "fit_markdown_length": len(fetched.fit_markdown or ""),
+            "cleaned_text_length": len(fetched.cleaned_text or fetched.text or ""),
             "text_preview": (fetched.text or candidate.snippet or "")[:1600],
             "error": fetched.error,
         }
@@ -267,6 +273,7 @@ class LLMNewsToolAgent:
         documents = dedupe_source_documents(documents)
         source_ids = {document.source_id for document in documents}
         source_texts = {key: value for key, value in self.source_texts.items() if key in source_ids}
+        source_text_artifacts = {key: value for key, value in self.source_text_artifacts.items() if key in source_ids}
         news_blocks = _blocks_from_llm_content(
             task,
             documents,
@@ -308,6 +315,7 @@ class LLMNewsToolAgent:
             news_blocks=news_blocks,
             timeline_update_suggestions=suggestions,
             source_texts=source_texts,
+            source_text_artifacts=source_text_artifacts,
         )
 
 
