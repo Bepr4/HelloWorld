@@ -1,3 +1,4 @@
+/* 这个文件负责模块一前端工作台的视觉层，输入为 HTML 状态类，输出为对话、过程追踪、结果与正文预览布局。 */
 :root {
   --ink: #e8e2d6;
   --muted: #9d9a91;
@@ -21,10 +22,7 @@ body {
   margin: 0;
   min-height: 100vh;
   color: var(--ink);
-  background:
-    linear-gradient(135deg, rgba(133, 216, 163, 0.08), transparent 32%),
-    radial-gradient(circle at 80% 12%, rgba(223, 179, 95, 0.12), transparent 34%),
-    var(--paper);
+  background: linear-gradient(180deg, #101314 0%, var(--paper) 100%);
   font-family: "Bahnschrift", "Aptos", "Segoe UI", sans-serif;
 }
 
@@ -248,6 +246,269 @@ button:disabled {
   margin-bottom: 18px;
 }
 
+.run-dashboard {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.current-step {
+  padding: 16px;
+  border: 1px solid rgba(142, 202, 230, 0.42);
+  background: #151b1e;
+}
+
+.current-step h3,
+.section-title h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.current-step p:last-child {
+  margin: 8px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.stage-board {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.stage-card {
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: rgba(29, 27, 24, 0.78);
+}
+
+.stage-card.running {
+  border-color: rgba(223, 179, 95, 0.58);
+  background: #211f18;
+}
+
+.stage-card.completed {
+  border-color: rgba(133, 216, 163, 0.5);
+}
+
+.stage-card.warning {
+  border-color: rgba(223, 179, 95, 0.72);
+}
+
+.stage-card.failed {
+  border-color: rgba(255, 123, 115, 0.7);
+}
+
+.stage-card.pending {
+  opacity: 0.78;
+}
+
+.stage-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 650;
+}
+
+.stage-dot {
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+  background: currentColor;
+}
+
+.stage-card.pending .stage-dot {
+  color: #6f6a60;
+}
+
+.stage-card.running .stage-dot,
+.stage-card.warning .stage-dot {
+  color: var(--amber);
+}
+
+.stage-card.completed .stage-dot {
+  color: var(--green);
+}
+
+.stage-card.failed .stage-dot {
+  color: var(--red);
+}
+
+.stage-detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.stage-state {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.progress-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(92px, 1fr));
+  gap: 10px;
+}
+
+.process-metric {
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #181714;
+}
+
+.process-metric span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.process-metric strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 25px;
+  line-height: 1;
+}
+
+.process-metric.success strong {
+  color: var(--green);
+}
+
+.process-metric.danger strong {
+  color: var(--red);
+}
+
+.process-metric.warning strong {
+  color: var(--amber);
+}
+
+.warning-panel,
+.fetch-watch {
+  border: 1px solid var(--line);
+  background: rgba(18, 18, 16, 0.7);
+}
+
+.section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.section-title span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.warning-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.warning-item {
+  padding: 10px;
+  border-left: 3px solid var(--amber);
+  color: #efe8dd;
+  background: rgba(223, 179, 95, 0.09);
+}
+
+.warning-item.failed {
+  border-left-color: var(--red);
+  background: rgba(255, 123, 115, 0.09);
+}
+
+.warning-item strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 13px;
+}
+
+.warning-item p,
+.empty-note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.fetch-table-wrap {
+  overflow: auto;
+}
+
+.fetch-table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.fetch-table th,
+.fetch-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  color: #ded8ce;
+  text-align: left;
+  vertical-align: top;
+}
+
+.fetch-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  background: #151412;
+}
+
+.fetch-table td {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.fetch-table a {
+  color: var(--cyan);
+  overflow-wrap: anywhere;
+}
+
+.fetch-pill {
+  display: inline-block;
+  min-width: 74px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.fetch-pill.success {
+  color: var(--green);
+  border-color: rgba(133, 216, 163, 0.45);
+}
+
+.fetch-pill.failed {
+  color: var(--red);
+  border-color: rgba(255, 123, 115, 0.48);
+}
+
+.fetch-pill.metadata_only {
+  color: var(--amber);
+  border-color: rgba(223, 179, 95, 0.48);
+}
+
+.empty-cell {
+  color: var(--muted);
+  text-align: center;
+}
+
 .event-stream {
   display: grid;
   gap: 10px;
@@ -278,12 +539,17 @@ button:disabled {
   color: var(--muted);
 }
 
+.event-detail {
+  margin-top: 8px;
+}
+
 .event-main pre {
   max-height: 260px;
   overflow: auto;
   padding: 10px;
   color: #d8d2c8;
   background: #11100f;
+  white-space: pre-wrap;
 }
 
 .event-status {
@@ -304,8 +570,26 @@ button:disabled {
 }
 
 .event-status.failed,
-.event-status.rejected {
+.event-status.rejected,
+.event-status.warning {
   color: var(--red);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.chip {
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid rgba(142, 202, 230, 0.26);
+  color: #c8ddea;
+  background: rgba(142, 202, 230, 0.08);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .summary-grid {
@@ -390,6 +674,12 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .stage-board,
+  .progress-grid,
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .chat-pane {
     min-height: 55vh;
     border-right: 0;
@@ -398,5 +688,31 @@ button:disabled {
 
   .event-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .tab {
+    min-width: 0;
+    flex: 1;
+    padding: 13px 10px;
+  }
+
+  .tab-panel {
+    padding: 16px;
+  }
+
+  .stage-board,
+  .progress-grid,
+  .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .section-title {
+    display: grid;
+  }
+
+  .section-title span {
+    text-align: left;
   }
 }

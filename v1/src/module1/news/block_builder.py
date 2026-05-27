@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 
 from module1.models import NewsBlock, SourceDocument, TimelineCollectionTask
+from module1.news.text_cleaner import first_meaningful_excerpt
 
 
 class NewsBlockBuilder:
@@ -31,14 +32,14 @@ class NewsBlockBuilder:
             summaries = [
                 {
                     "source_id": doc.source_id,
-                    "summary": _first_sentence(source_texts.get(doc.source_id, "")) or doc.title or "",
+                    "summary": _source_excerpt(source_texts.get(doc.source_id, "")) or doc.title or "",
                 }
                 for doc in docs
             ]
             reported_facts = [
                 {
                     "source_id": doc.source_id,
-                    "text": _first_sentence(source_texts.get(doc.source_id, "")) or doc.title or "",
+                    "text": _source_excerpt(source_texts.get(doc.source_id, "")) or doc.title or "",
                 }
                 for doc in docs
             ]
@@ -48,7 +49,7 @@ class NewsBlockBuilder:
                     event_id=task.event_id,
                     timeline_item_id=timeline_item_id,
                     title=title,
-                    summary=" ".join(item["summary"] for item in summaries if item["summary"])[:500],
+                    summary=_block_summary(summaries),
                     event_time=_event_time_for(task, timeline_item_id),
                     reported_facts=reported_facts,
                     source_summaries=summaries,
@@ -69,6 +70,19 @@ def _first_sentence(text: str) -> str:
         if delimiter in text:
             return text.split(delimiter, 1)[0].strip() + ("." if delimiter == ". " else "")
     return text.strip()[:240]
+
+
+def _source_excerpt(text: str) -> str:
+    """从来源正文中提取真正像新闻事实的片段，避免把导航和分享文案写进摘要。"""
+
+    return first_meaningful_excerpt(text, limit=520)
+
+
+def _block_summary(summaries: list[dict[str, str]]) -> str:
+    """合并多个来源摘要时保留可读的短句，而不是拼接整段网页 markdown。"""
+
+    parts = [item["summary"] for item in summaries if item.get("summary")]
+    return " ".join(parts)[:900]
 
 
 def _event_time_for(task: TimelineCollectionTask, timeline_item_id: str) -> str | None:

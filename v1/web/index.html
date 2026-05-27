@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- 这个文件定义模块一前端工作台的页面结构，承接运行输入、过程追踪、结果包、原始 JSON 与来源正文预览。 -->
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
@@ -21,7 +22,7 @@
           <article class="message assistant">
             <div class="avatar">A</div>
             <div class="bubble">
-              <p>输入一个事件，我会启动模块一采集流程，并把范围、时间线、候选来源、抓取结果和最终材料包都展示出来。</p>
+              <p>输入一个事件后，我会启动模块一采集流程，并把范围、时间线、候选来源、抓取结果和最终材料包都展示出来。</p>
             </div>
           </article>
         </div>
@@ -50,10 +51,82 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">Trace</p>
-              <h2>步骤事件流</h2>
+              <h2>运行过程</h2>
             </div>
             <button class="secondary" id="clearEvents" type="button">清空</button>
           </div>
+
+          <div class="run-dashboard" aria-live="polite">
+            <section class="current-step" aria-label="当前步骤">
+              <p class="eyebrow">Current Step</p>
+              <h3 id="currentStepTitle">等待输入</h3>
+              <p id="currentStepDetail">提交一个事件后，这里会显示 Agent 当前正在做什么。</p>
+            </section>
+
+            <section class="stage-board" id="stageBoard" aria-label="阶段状态"></section>
+
+            <section class="progress-grid" aria-label="运行计数">
+              <div class="process-metric">
+                <span>候选 URL</span>
+                <strong id="metricCandidates">0</strong>
+              </div>
+              <div class="process-metric">
+                <span>已抓取</span>
+                <strong id="metricFetched">0</strong>
+              </div>
+              <div class="process-metric success">
+                <span>抓取成功</span>
+                <strong id="metricFetchSuccess">0</strong>
+              </div>
+              <div class="process-metric danger">
+                <span>抓取失败</span>
+                <strong id="metricFetchFailed">0</strong>
+              </div>
+              <div class="process-metric">
+                <span>入包来源</span>
+                <strong id="metricAccepted">0</strong>
+              </div>
+              <div class="process-metric warning">
+                <span>警告</span>
+                <strong id="metricWarnings">0</strong>
+              </div>
+            </section>
+
+            <section class="warning-panel" aria-label="警告和降级">
+              <div class="section-title">
+                <h3>警告与降级</h3>
+                <span>LLM JSON 修复、抓取失败、兜底结果会出现在这里</span>
+              </div>
+              <div class="warning-list" id="warningList">
+                <p class="empty-note">暂无警告。</p>
+              </div>
+            </section>
+
+            <section class="fetch-watch" aria-label="网页抓取状态">
+              <div class="section-title">
+                <h3>网页抓取</h3>
+                <span>可快速判断是搜索没结果，还是 fetch_url 失败</span>
+              </div>
+              <div class="fetch-table-wrap">
+                <table class="fetch-table">
+                  <thead>
+                    <tr>
+                      <th>站点</th>
+                      <th>状态</th>
+                      <th>标题 / URL</th>
+                      <th>错误</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fetchTableBody">
+                    <tr>
+                      <td colspan="4" class="empty-cell">暂无抓取记录。</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
           <div class="event-stream" id="eventStream"></div>
         </section>
 

@@ -1,6 +1,7 @@
 # 这个文件实现真正的新闻工具 Agent：LLM 决定调用 RSS/搜索/抓取工具，Python 负责安全执行和落盘结构化。
 from __future__ import annotations
 
+# 这个文件实现模块一的 LLM 新闻工具 Agent，负责编排搜索、抓取和最终新闻来源筛选。
 import json
 import re
 from typing import Any
@@ -54,12 +55,11 @@ class LLMNewsToolAgent:
             emit("llm_agent", "started", f"LLM 决策第 {step} 轮", {"messages": len(messages)})
             try:
                 raw = agent_client.chat_text(messages)
-                decision = _parse_json_object(raw)
             except Exception as exc:
                 emit(
                     "llm_agent",
                     "warning" if self.documents_by_url else "failed",
-                    f"LLM 决策第 {step} 轮失败，使用已抓取材料继续" if self.documents_by_url else f"LLM 决策第 {step} 轮失败",
+                    f"LLM 决策第 {step} 轮调用失败，使用已抓取材料继续" if self.documents_by_url else f"LLM 决策第 {step} 轮调用失败",
                     {
                         "error": f"{exc.__class__.__name__}: {exc}",
                         "partial_documents": len(self.documents_by_url),
@@ -69,6 +69,32 @@ class LLMNewsToolAgent:
                     final_payload = {}
                     break
                 raise
+
+            try:
+                decision = _parse_json_object(raw)
+            except Exception as exc:
+                decision = _repair_decision_json(
+                    raw=raw,
+                    parse_error=exc,
+                    messages=messages,
+                    agent_client=agent_client,
+                    emit=emit,
+                    step=step,
+                )
+                if decision is None:
+                    emit(
+                        "llm_agent",
+                        "warning" if self.documents_by_url else "failed",
+                        f"LLM 决策第 {step} 轮 JSON 修复失败，使用已抓取材料继续" if self.documents_by_url else f"LLM 决策第 {step} 轮 JSON 修复失败",
+                        {
+                            "error": f"{exc.__class__.__name__}: {exc}",
+                            "partial_documents": len(self.documents_by_url),
+                        },
+                    )
+                    if self.documents_by_url:
+                        final_payload = {}
+                        break
+                    raise
             emit(
                 "llm_agent",
                 "completed",
@@ -232,7 +258,10 @@ class LLMNewsToolAgent:
                 {
                     "candidate_count": len(self.candidates_by_url),
                     "fetched_count": len(self.documents_by_url),
-                    "likely_reason": "web_search 没有返回可进入白名单的候选来源；请检查搜索 API key、搜索 provider 配置或查询词。",
+                    "likely_reason": _empty_result_reason(
+                        candidate_count=len(self.candidates_by_url),
+                        documents=list(self.documents_by_url.values()),
+                    ),
                 },
             )
 
@@ -252,6 +281,95 @@ class LLMNewsToolAgent:
             timeline_update_suggestions=suggestions,
             source_texts=source_texts,
         )
+
+
+def _repair_decision_json(
+    *,
+    raw: str,
+    parse_error: Exception,
+    messages: list[dict[str, str]],
+    agent_client: object,
+    emit,
+    step: int,
+) -> dict[str, Any] | None:
+    """当模型输出损坏 JSON 时，请模型只修复 JSON，一次失败后再走兜底逻辑。"""
+
+    emit(
+        "llm_agent_repair",
+        "started",
+        f"LLM 决策第 {step} 轮 JSON 解析失败，尝试自动修复",
+        {
+            "error": f"{parse_error.__class__.__name__}: {parse_error}",
+            "raw_preview": raw[:1200],
+        },
+    )
+    repair_messages = [
+        *messages,
+        {
+            "role": "assistant",
+            "content": raw,
+        },
+        {
+            "role": "user",
+            "content": (
+                "The previous assistant message was intended to be JSON but is invalid. "
+                "Return ONLY one repaired JSON object using the same schema. "
+                "Do not add markdown or explanations."
+            ),
+        },
+    ]
+    try:
+        repaired_raw = agent_client.chat_text(repair_messages)
+        decision = _parse_json_object(repaired_raw)
+    except Exception as exc:
+        emit(
+            "llm_agent_repair",
+            "failed",
+            "LLM JSON 自动修复失败",
+            {
+                "error": f"{exc.__class__.__name__}: {exc}",
+                "raw_preview": raw[:1200],
+            },
+        )
+        return None
+
+    emit(
+        "llm_agent_repair",
+        "completed",
+        "LLM JSON 自动修复成功",
+        {"decision": decision},
+    )
+    return decision
+
+
+def _empty_result_reason(*, candidate_count: int, documents: list[SourceDocument]) -> str:
+    """根据搜索候选和抓取结果生成更准确的空结果诊断。"""
+
+    fetched_count = len(documents)
+    if candidate_count == 0:
+        return "web_search 没有返回可进入白名单的候选来源；请检查搜索 API key、搜索 provider 配置或查询词。"
+    if fetched_count == 0:
+        return "web_search 已返回白名单候选，但 LLM 没有调用 fetch_url 抓取正文；请检查工具调用轮次或模型决策。"
+
+    failed_documents = [document for document in documents if document.fetch_status == "failed"]
+    if len(failed_documents) == fetched_count:
+        first_error = next((document.fetch_error for document in failed_documents if document.fetch_error), "未知抓取错误")
+        return (
+            f"web_search 已返回 {candidate_count} 个白名单候选，fetch_url 抓取了 {fetched_count} 个 URL，"
+            f"但全部失败；首个错误：{first_error}。请检查 Crawl4AI、浏览器运行权限、网络访问或站点反爬。"
+        )
+
+    metadata_only_count = sum(1 for document in documents if document.fetch_status == "metadata_only")
+    if metadata_only_count == fetched_count:
+        return (
+            f"web_search 已返回 {candidate_count} 个白名单候选，fetch_url 抓取了 {fetched_count} 个 URL，"
+            "但都只有元数据没有可用正文；请检查正文抽取质量或页面动态渲染。"
+        )
+
+    return (
+        f"web_search 已返回 {candidate_count} 个白名单候选，fetch_url 抓取了 {fetched_count} 个 URL，"
+        "但没有最终进入 accepted_urls 的 success 文档；请检查 LLM final.accepted_urls 或抓取状态筛选。"
+    )
 
 
 def _system_prompt() -> str:

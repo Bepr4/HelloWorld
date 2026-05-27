@@ -10,7 +10,7 @@ from module1.intake.wiki_client import EmptyWikiClient
 from module1.llm.agent_client import AgentClient, build_agent_client
 from module1.models import EventInfoPackage, EventScopeConfirmation
 from module1.news.agent import NewsAgent
-from module1.news.fetcher import InMemoryFetcher, UrlLibFetcher
+from module1.news.fetcher import Crawl4AIFetcher, InMemoryFetcher
 from module1.news.llm_tool_agent import LLMNewsToolAgent
 from module1.news.search_providers import (
     BraveSearchProvider,
@@ -143,9 +143,9 @@ def _build_search_provider(settings: Module1Settings):
 
 
 def _build_fetcher(settings: Module1Settings):
-    """真实搜索时默认用 urllib 抓网页；空搜索时保留内存抓取器方便测试。"""
+    """真实搜索时统一用 Crawl4AI 抓网页；空搜索时保留内存抓取器方便测试。"""
 
     provider = settings.search_provider.lower()
     if provider in {"none", "manual", "static", "fake", "mock"}:
         return InMemoryFetcher({})
-    return UrlLibFetcher(user_agent=settings.user_agent, timeout=settings.http_timeout_seconds)
+    return Crawl4AIFetcher(user_agent=settings.user_agent, timeout=settings.http_timeout_seconds)
