@@ -355,7 +355,7 @@ button:disabled {
 
 .progress-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(92px, 1fr));
+  grid-template-columns: repeat(7, minmax(92px, 1fr));
   gap: 10px;
 }
 
@@ -384,6 +384,10 @@ button:disabled {
 
 .process-metric.danger strong {
   color: var(--red);
+}
+
+.process-metric.blocked strong {
+  color: var(--amber);
 }
 
 .process-metric.warning strong {
@@ -497,6 +501,11 @@ button:disabled {
 .fetch-pill.failed {
   color: var(--red);
   border-color: rgba(255, 123, 115, 0.48);
+}
+
+.fetch-pill.blocked {
+  color: var(--amber);
+  border-color: rgba(223, 179, 95, 0.62);
 }
 
 .fetch-pill.metadata_only {

@@ -48,6 +48,12 @@ class Module1Settings(BaseModel):
     storage_root: Path = Path("data/module1")
     user_agent: str = "HelloWorldModule1/0.1"
     http_timeout_seconds: int = Field(default=20, gt=0)
+    crawl4ai_enable_stealth: bool = True
+    crawl4ai_use_undetected: bool = True
+    crawl4ai_headless: bool = True
+    crawl4ai_max_retries: int = Field(default=1, ge=0)
+    crawl4ai_profile_dir: Path | None = None
+    crawl4ai_proxy: str | None = None
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -229,6 +235,16 @@ def load_module1_settings(
         storage_root=Path(merged.get("MODULE1_STORAGE_ROOT", "data/module1")),
         user_agent=merged.get("MODULE1_USER_AGENT", "HelloWorldModule1/0.1"),
         http_timeout_seconds=int(merged.get("MODULE1_HTTP_TIMEOUT_SECONDS", "20")),
+        crawl4ai_enable_stealth=_as_bool(merged.get("MODULE1_CRAWL4AI_ENABLE_STEALTH"), True),
+        crawl4ai_use_undetected=_as_bool(merged.get("MODULE1_CRAWL4AI_USE_UNDETECTED"), True),
+        crawl4ai_headless=_as_bool(merged.get("MODULE1_CRAWL4AI_HEADLESS"), True),
+        crawl4ai_max_retries=int(merged.get("MODULE1_CRAWL4AI_MAX_RETRIES", "1")),
+        crawl4ai_profile_dir=(
+            Path(merged["MODULE1_CRAWL4AI_PROFILE_DIR"])
+            if merged.get("MODULE1_CRAWL4AI_PROFILE_DIR")
+            else None
+        ),
+        crawl4ai_proxy=merged.get("MODULE1_CRAWL4AI_PROXY") or None,
     )
 
     if require_llm_key and provider.lower() not in {"fake", "mock", "none"}:

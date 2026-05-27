@@ -13,6 +13,7 @@ import urllib.request
 
 from module1.models import FetchedPage
 from module1.news.extractor import extract_title, strip_html
+from module1.news.source_quality import source_quality_issue
 from module1.news.text_cleaner import clean_article_text
 
 
@@ -72,11 +73,23 @@ class Crawl4AIFetcher:
         *,
         base_directory: str | Path | None = None,
         crawler: Callable[[str], Awaitable[Any]] | None = None,
+        enable_stealth: bool = True,
+        use_undetected_on_block: bool = True,
+        headless: bool = True,
+        max_retries: int = 1,
+        managed_profile_dir: str | Path | None = None,
+        proxy: str | None = None,
     ) -> None:
         self.user_agent = user_agent
         self.timeout = timeout
         self.base_directory = Path(base_directory) if base_directory is not None else _default_crawl4ai_base_directory()
         self._crawler = crawler
+        self.enable_stealth = enable_stealth
+        self.use_undetected_on_block = use_undetected_on_block
+        self.headless = headless
+        self.max_retries = max_retries
+        self.managed_profile_dir = Path(managed_profile_dir) if managed_profile_dir else None
+        self.proxy = proxy
 
     def fetch(self, url: str) -> FetchedPage:
         """用 Crawl4AI 抓取 URL，并把失败原因保留到 FetchedPage.error。"""
@@ -84,7 +97,8 @@ class Crawl4AIFetcher:
         try:
             result = _run_async(self._crawl(url))
         except Exception as exc:
-            return FetchedPage(url=url, status="failed", error=f"{exc.__class__.__name__}: {exc}")
+            error = f"{exc.__class__.__name__}: {exc}"
+            return FetchedPage(url=url, status=_status_from_error(error), error=error)
 
         return self._result_to_page(url, result)
 
@@ -95,30 +109,40 @@ class Crawl4AIFetcher:
         self._prepare_runtime_directory()
         try:
             import crawl4ai.async_webcrawler as crawl4ai_webcrawler
-            from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
+            from crawl4ai import (
+                AsyncWebCrawler,
+                BrowserConfig,
+                CacheMode,
+                CrawlerRunConfig,
+                DefaultMarkdownGenerator,
+                ProxyConfig,
+            )
+            from crawl4ai.content_filter_strategy import PruningContentFilter
         except ImportError as exc:
             raise RuntimeError("crawl4ai is not installed. Install project dependencies before running fetch_url.") from exc
         _disable_crawl4ai_robots_db(crawl4ai_webcrawler)
 
-        browser_config = _make_config(
-            BrowserConfig,
-            browser_type="chromium",
-            headless=True,
-            user_agent=self.user_agent,
-            ignore_https_errors=True,
-            headers={
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
-            },
+        markdown_generator = _make_config(
+            DefaultMarkdownGenerator,
+            content_filter=_make_config(
+                PruningContentFilter,
+                threshold=0.5,
+                threshold_type="dynamic",
+                min_word_threshold=40,
+            ),
+            options={"ignore_links": True, "escape_html": False},
         )
         run_config = _make_config(
             CrawlerRunConfig,
             verbose=False,
             cache_mode=CacheMode.BYPASS,
-            word_count_threshold=10,
-            excluded_tags=["script", "style", "nav", "footer", "form"],
+            markdown_generator=markdown_generator,
+            word_count_threshold=20,
+            excluded_tags=["script", "style", "nav", "footer", "form", "aside"],
+            excluded_selector="header, footer, nav, aside, [role='navigation'], [aria-label*='share']",
             exclude_external_links=True,
             exclude_social_media_links=True,
+            exclude_external_images=True,
             remove_forms=True,
             remove_overlay_elements=True,
             remove_consent_popups=True,
@@ -128,9 +152,92 @@ class Crawl4AIFetcher:
             magic=True,
             simulate_user=True,
             override_navigator=True,
+            max_retries=self.max_retries,
+            proxy_config=_proxy_config(self.proxy, ProxyConfig),
         )
 
-        # 每次 fetch_url 只抓一个新闻页，独立浏览器上下文便于隔离 Cookie 和页面状态。
+        normal = await self._crawl_once(
+            url,
+            AsyncWebCrawler=AsyncWebCrawler,
+            BrowserConfig=BrowserConfig,
+            run_config=run_config,
+            enable_stealth=False,
+            use_undetected=False,
+        )
+        if not _is_blocked_result(normal):
+            return normal
+        if not _should_retry_blocked_result(normal):
+            return normal
+
+        if self.enable_stealth:
+            stealth = await self._crawl_once(
+                url,
+                AsyncWebCrawler=AsyncWebCrawler,
+                BrowserConfig=BrowserConfig,
+                run_config=run_config,
+                enable_stealth=True,
+                use_undetected=False,
+            )
+            if not _is_blocked_result(stealth):
+                return stealth
+            if not _should_retry_blocked_result(stealth):
+                return stealth
+            normal = stealth
+
+        if self.use_undetected_on_block:
+            try:
+                undetected = await self._crawl_once(
+                    url,
+                    AsyncWebCrawler=AsyncWebCrawler,
+                    BrowserConfig=BrowserConfig,
+                    run_config=run_config,
+                    enable_stealth=self.enable_stealth,
+                    use_undetected=True,
+                )
+            except Exception:
+                return normal
+            return undetected
+
+        return normal
+
+    async def _crawl_once(
+        self,
+        url: str,
+        *,
+        AsyncWebCrawler: type,
+        BrowserConfig: type,
+        run_config: Any,
+        enable_stealth: bool,
+        use_undetected: bool,
+    ) -> Any:
+        """运行一次 Crawl4AI 抓取；必要时使用官方 UndetectedAdapter。"""
+
+        browser_config = _make_config(
+            BrowserConfig,
+            browser_type="chromium",
+            headless=self.headless,
+            use_managed_browser=bool(self.managed_profile_dir),
+            user_data_dir=str(self.managed_profile_dir) if self.managed_profile_dir else None,
+            user_agent=self.user_agent,
+            ignore_https_errors=True,
+            enable_stealth=enable_stealth,
+            headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7",
+            },
+        )
+
+        if use_undetected:
+            from crawl4ai import UndetectedAdapter
+            from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
+
+            crawler_strategy = AsyncPlaywrightCrawlerStrategy(
+                browser_config=browser_config,
+                browser_adapter=UndetectedAdapter(),
+            )
+            async with AsyncWebCrawler(crawler_strategy=crawler_strategy, config=browser_config) as crawler:
+                return await crawler.arun(url=url, config=run_config)
+
         async with AsyncWebCrawler(config=browser_config) as crawler:
             return await crawler.arun(url=url, config=run_config)
 
@@ -159,15 +266,35 @@ class Crawl4AIFetcher:
         text = clean_article_text(_extract_crawl_text(result) or "")
 
         if not getattr(result, "success", False):
+            error = _crawl_error(result)
             return FetchedPage(
                 url=final_url,
                 title=title,
                 published_at=published_at,
-                status="failed",
-                error=_crawl_error(result),
+                status=_status_from_error(error),
+                error=error,
+            )
+
+        if _looks_blocked_text(text):
+            return FetchedPage(
+                url=final_url,
+                title=title,
+                published_at=published_at,
+                status="blocked",
+                error="blocked_by_antibot: page content looks like an anti-bot challenge",
             )
 
         if text:
+            quality_issue = source_quality_issue(final_url, title, text)
+            if quality_issue:
+                return FetchedPage(
+                    url=final_url,
+                    title=title,
+                    text=text,
+                    published_at=published_at,
+                    status="metadata_only",
+                    error=f"low_quality: {quality_issue}",
+                )
             return FetchedPage(
                 url=final_url,
                 title=title,
@@ -238,6 +365,98 @@ def _make_config(config_cls: type, **kwargs: Any) -> Any:
         signature = inspect.signature(config_cls)
         accepted = {name for name in signature.parameters if name != "self"}
         return config_cls(**{key: value for key, value in kwargs.items() if key in accepted})
+
+
+def _proxy_config(proxy: str | None, ProxyConfig: type) -> Any:
+    """从环境配置解析 Crawl4AI proxy_config；支持 direct 和逗号分隔代理链。"""
+
+    if not proxy:
+        return None
+    items = [item.strip() for item in proxy.split(",") if item.strip()]
+    if not items:
+        return None
+    parsed = []
+    for item in items:
+        if item.lower() == "direct":
+            parsed.append(getattr(ProxyConfig, "DIRECT", "direct"))
+        elif hasattr(ProxyConfig, "from_string"):
+            parsed.append(ProxyConfig.from_string(item))
+        else:
+            parsed.append(item)
+    return parsed[0] if len(parsed) == 1 else parsed
+
+
+def _is_blocked_result(result: Any) -> bool:
+    """根据 Crawl4AI 返回值判断是否遇到反爬阻断。"""
+
+    if getattr(result, "success", False) and not _looks_blocked_text(_extract_crawl_text(result) or ""):
+        return False
+    return _is_anti_bot_error(_crawl_error(result)) or _looks_blocked_text(_extract_crawl_text(result) or "")
+
+
+def _should_retry_blocked_result(result: Any) -> bool:
+    """明确的站点临时限制页不继续重试，避免连续触发更重的风控。"""
+
+    text = _extract_crawl_text(result) or ""
+    return not _looks_temporary_restricted_text(text)
+
+
+def _status_from_error(error: str) -> str:
+    return "blocked" if _is_anti_bot_error(error) else "failed"
+
+
+def _is_anti_bot_error(error: str) -> bool:
+    lowered = error.lower()
+    return any(
+        marker in lowered
+        for marker in [
+            "datadome",
+            "captcha",
+            "anti-bot",
+            "antibot",
+            "cloudflare",
+            "access denied",
+            "access is temporarily restricted",
+            "perimeterx",
+            "blocked by",
+            "bot detection",
+            "challenge page",
+        ]
+    )
+
+
+def _looks_blocked_text(text: str) -> bool:
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in [
+            "datadome captcha",
+            "enable javascript and cookies",
+            "checking your browser",
+            "just a moment",
+            "verify you are human",
+            "access denied",
+            "unusual traffic",
+            "unusual activity from your device or network",
+            "access is temporarily restricted",
+            "automated (bot) activity",
+            "use of developer or inspection tools",
+        ]
+    )
+
+
+def _looks_temporary_restricted_text(text: str) -> bool:
+    """识别 Reuters 这类已经临时限制身份的页面，和普通验证码挑战区分开。"""
+
+    lowered = text.lower()
+    return any(
+        marker in lowered
+        for marker in [
+            "access is temporarily restricted",
+            "unusual activity from your device or network",
+            "automated (bot) activity",
+        ]
+    )
 
 
 def _extract_crawl_text(result: Any) -> str | None:

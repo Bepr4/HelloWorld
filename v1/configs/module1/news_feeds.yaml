@@ -11,9 +11,7 @@ feeds:
     feed_url: https://news.un.org/feed/subscribe/en/news/all/rss.xml
     language: en
 
-  - domain: reuters.com
-    feed_url: https://feeds.reuters.com/reuters/worldNews
-    language: en
+  # Reuters 当前会频繁触发临时访问限制，先从 RSS 搜索源中停用。
 
   - domain: apnews.com
     feed_url: https://apnews.com/hub/ap-top-news?output=rss

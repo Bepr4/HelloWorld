@@ -148,4 +148,13 @@ def _build_fetcher(settings: Module1Settings):
     provider = settings.search_provider.lower()
     if provider in {"none", "manual", "static", "fake", "mock"}:
         return InMemoryFetcher({})
-    return Crawl4AIFetcher(user_agent=settings.user_agent, timeout=settings.http_timeout_seconds)
+    return Crawl4AIFetcher(
+        user_agent=settings.user_agent,
+        timeout=settings.http_timeout_seconds,
+        enable_stealth=settings.crawl4ai_enable_stealth,
+        use_undetected_on_block=settings.crawl4ai_use_undetected,
+        headless=settings.crawl4ai_headless,
+        max_retries=settings.crawl4ai_max_retries,
+        managed_profile_dir=settings.crawl4ai_profile_dir,
+        proxy=settings.crawl4ai_proxy,
+    )

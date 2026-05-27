@@ -105,6 +105,28 @@ def test_settings_allow_separate_llm_and_http_timeouts():
     assert settings.llm_timeout_seconds == 90
 
 
+def test_settings_load_crawl4ai_escalation_options():
+    settings = load_module1_settings(
+        dotenv_path="tmp/tests/settings/.env",
+        env={
+            "MODULE1_LLM_PROVIDER": "fake",
+            "MODULE1_CRAWL4AI_ENABLE_STEALTH": "false",
+            "MODULE1_CRAWL4AI_USE_UNDETECTED": "true",
+            "MODULE1_CRAWL4AI_HEADLESS": "false",
+            "MODULE1_CRAWL4AI_MAX_RETRIES": "2",
+            "MODULE1_CRAWL4AI_PROFILE_DIR": "tmp/tests/crawl4ai-profile",
+            "MODULE1_CRAWL4AI_PROXY": "direct,http://proxy.example.com:8080",
+        },
+    )
+
+    assert settings.crawl4ai_enable_stealth is False
+    assert settings.crawl4ai_use_undetected is True
+    assert settings.crawl4ai_headless is False
+    assert settings.crawl4ai_max_retries == 2
+    assert str(settings.crawl4ai_profile_dir).replace("\\", "/") == "tmp/tests/crawl4ai-profile"
+    assert settings.crawl4ai_proxy == "direct,http://proxy.example.com:8080"
+
+
 def test_settings_require_search_key_for_web_search():
     with pytest.raises(MissingSettingError):
         load_module1_settings(

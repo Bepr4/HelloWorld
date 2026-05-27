@@ -122,6 +122,14 @@ class LLMNewsToolAgent:
                 }
             )
 
+        if not isinstance(final_payload, dict) and self.documents_by_url:
+            final_payload = _force_final_decision(
+                messages=messages,
+                agent_client=agent_client,
+                emit=emit,
+                documents=list(self.documents_by_url.values()),
+            )
+
         return self._build_result(task, final_payload or {}, emit)
 
     def _execute_tool(self, call: dict, task: TimelineCollectionTask, emit) -> dict:
@@ -237,6 +245,8 @@ class LLMNewsToolAgent:
             document = self.documents_by_url.get(_url_key(url))
             if not document:
                 continue
+            if document.fetch_status != "success":
+                continue
             if not document.timeline_item_id:
                 document.timeline_item_id = _default_timeline_item_id(task)
             document.relevance_score = 0.9
@@ -342,6 +352,80 @@ def _repair_decision_json(
     return decision
 
 
+def _force_final_decision(
+    *,
+    messages: list[dict[str, str]],
+    agent_client: object,
+    emit,
+    documents: list[SourceDocument],
+) -> dict[str, Any]:
+    """工具轮数用尽时再要求模型做一次最终选择，避免静默接受所有成功抓取页面。"""
+
+    compact_documents = [
+        {
+            "url": document.url,
+            "title": document.title,
+            "publisher": document.publisher,
+            "fetch_status": document.fetch_status,
+            "fetch_error": document.fetch_error,
+        }
+        for document in documents
+    ]
+    emit(
+        "llm_agent_force_final",
+        "started",
+        "LLM 工具轮数已用尽，要求模型只返回最终 JSON",
+        {"documents": compact_documents},
+    )
+    final_messages = [
+        *messages,
+        {
+            "role": "user",
+            "content": (
+                "Tool budget is exhausted. Do not call tools. Return ONLY valid JSON with this schema: "
+                '{"thought":"final selection","tool_calls":[],"final":{"accepted_urls":[],"news_blocks":[],"timeline_update_suggestions":[]}}. '
+                "Only include URLs whose fetch_status is success. Exclude blocked, failed, metadata_only, topic pages, and low-quality pages. "
+                "Fetched document inventory:\n"
+                + json.dumps(compact_documents, ensure_ascii=False, indent=2)
+            ),
+        },
+    ]
+    try:
+        raw = agent_client.chat_text(final_messages)
+        decision = _parse_json_object(raw)
+    except Exception as exc:
+        repaired = _repair_decision_json(
+            raw=raw if "raw" in locals() else "",
+            parse_error=exc,
+            messages=final_messages,
+            agent_client=agent_client,
+            emit=emit,
+            step=0,
+        )
+        if repaired is None:
+            emit(
+                "llm_agent_force_final",
+                "failed",
+                "LLM 最终选择失败，使用质量门槛后的成功来源兜底",
+                {"error": f"{exc.__class__.__name__}: {exc}"},
+            )
+            return {}
+        decision = repaired
+
+    final_payload = decision.get("final") if isinstance(decision, dict) else None
+    if isinstance(final_payload, dict):
+        emit("llm_agent_force_final", "completed", "LLM 已返回最终选择", final_payload)
+        return final_payload
+
+    emit(
+        "llm_agent_force_final",
+        "failed",
+        "LLM 最终选择没有包含 final 字段，使用质量门槛后的成功来源兜底",
+        {"decision": decision},
+    )
+    return {}
+
+
 def _empty_result_reason(*, candidate_count: int, documents: list[SourceDocument]) -> str:
     """根据搜索候选和抓取结果生成更准确的空结果诊断。"""
 
@@ -357,6 +441,14 @@ def _empty_result_reason(*, candidate_count: int, documents: list[SourceDocument
         return (
             f"web_search 已返回 {candidate_count} 个白名单候选，fetch_url 抓取了 {fetched_count} 个 URL，"
             f"但全部失败；首个错误：{first_error}。请检查 Crawl4AI、浏览器运行权限、网络访问或站点反爬。"
+        )
+
+    blocked_documents = [document for document in documents if document.fetch_status == "blocked"]
+    if len(blocked_documents) == fetched_count:
+        first_error = next((document.fetch_error for document in blocked_documents if document.fetch_error), "站点反爬阻断")
+        return (
+            f"web_search 已返回 {candidate_count} 个白名单候选，fetch_url 抓取了 {fetched_count} 个 URL，"
+            f"但全部被反爬阻断；首个错误：{first_error}。可以配置 Crawl4AI managed profile、undetected browser 或代理。"
         )
 
     metadata_only_count = sum(1 for document in documents if document.fetch_status == "metadata_only")
@@ -414,6 +506,7 @@ Rules:
 - Use only tool results. Do not invent URLs.
 - Fetch promising URLs before accepting them.
 - Unknown domains are rejected by the executor; do not try to bypass the source registry.
+- Only accept URLs whose fetch_status is "success"; blocked, failed, or metadata_only pages are diagnostics, not source evidence.
 """.strip()
 
 

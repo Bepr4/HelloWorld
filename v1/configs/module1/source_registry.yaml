@@ -20,12 +20,7 @@ sources:
     language: en
     core_evidence_allowed: true
 
-  - domain: reuters.com
-    source_tier: P1
-    source_type: wire
-    region: global
-    language: en
-    core_evidence_allowed: true
+  # Reuters 当前会频繁触发临时访问限制，先从自动搜索白名单中停用。
 
   - domain: apnews.com
     source_tier: P1

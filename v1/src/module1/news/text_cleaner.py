@@ -7,6 +7,7 @@ import re
 _EXACT_NOISE_LINES = {
     "read more",
     "share",
+    "share-nodes",
     "copy",
     "link copied",
     "print",
@@ -15,6 +16,18 @@ _EXACT_NOISE_LINES = {
     "advertisement",
     "listen",
     "listenlisten",
+    "site search",
+    "latest news",
+    "news",
+    "business",
+    "technology",
+    "culture",
+    "arts",
+    "travel",
+    "earth",
+    "audio",
+    "video",
+    "live",
 }
 
 _NOISE_PATTERNS = [
@@ -22,6 +35,13 @@ _NOISE_PATTERNS = [
     re.compile(r"^add ap news on google", re.IGNORECASE),
     re.compile(r"^googleadd .* on google", re.IGNORECASE),
     re.compile(r"^recommended stories$", re.IGNORECASE),
+    re.compile(r"^\*\s*(copy|print|share|save)\s*$", re.IGNORECASE),
+    re.compile(r"^[-•]\s*(copy|print|share|save)\s*$", re.IGNORECASE),
+    re.compile(r"^followfollow", re.IGNORECASE),
+    re.compile(r"^you are now following", re.IGNORECASE),
+    re.compile(r"^updates from your news topics", re.IGNORECASE),
+    re.compile(r"^by \[[^\]]+\]\(https?://[^)]+\)(,\s*\[[^\]]+\]\(https?://[^)]+\))*", re.IGNORECASE),
+    re.compile(r".*\(AP Photo/[^)]+\)\s*$", re.IGNORECASE),
     re.compile(r"^\d+\s+of\s+\d+(\s*\|)?$", re.IGNORECASE),
     re.compile(r"^\[[^\]]+\]\(https?://[^)]+\)$"),
     re.compile(r"^!\[[\s\S]*\]\(https?://[^)]+\)$"),
@@ -39,7 +59,7 @@ def clean_article_text(text: str) -> str:
     lines = [line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
     cleaned: list[str] = []
     skipping_recommendations = False
-    previous = ""
+    previous_normalized = ""
 
     for line in lines:
         if not line:
@@ -47,6 +67,7 @@ def clean_article_text(text: str) -> str:
                 cleaned.append("")
             continue
 
+        line = _strip_markdown_links(line)
         lowered = line.lower().strip()
         if lowered.startswith("## recommended stories") or lowered == "recommended stories":
             skipping_recommendations = True
@@ -58,11 +79,13 @@ def clean_article_text(text: str) -> str:
 
         if _is_noise_line(line):
             continue
-        if line == previous:
+        normalized = re.sub(r"^#+\s*", "", line).strip()
+        normalized = re.sub(r"^[*•-]\s*", "", normalized).strip()
+        if normalized.lower() == previous_normalized.lower():
             continue
 
         cleaned.append(line)
-        previous = line
+        previous_normalized = normalized
 
     return _compact_blank_lines("\n".join(cleaned)).strip()
 
@@ -98,6 +121,11 @@ def _is_noise_line(line: str) -> bool:
 def _compact_blank_lines(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     return re.sub(r"[ \t]+", " ", text)
+
+
+def _strip_markdown_links(line: str) -> str:
+    line = re.sub(r"!\[([^\]]*)\]\(https?://[^)]+\)", r"\1", line)
+    return re.sub(r"\[([^\]]+)\]\(https?://[^)]+\)", r"\1", line)
 
 
 def _truncate_at_sentence(text: str, limit: int) -> str:

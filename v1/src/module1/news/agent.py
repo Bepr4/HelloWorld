@@ -55,6 +55,8 @@ class NewsAgent:
         for candidate in _dedupe_candidates(candidates):
             fetched = self.fetcher.fetch(candidate.url)
             document = _document_from_candidate(task.event_id, candidate, fetched)
+            if fetched.status != "success" or not fetched.text:
+                continue
             text = fetched.text or candidate.snippet or ""
             item = _find_item(task, candidate.timeline_item_id)
             decision = self.relevance_judge.judge_source(document, task, text=text, item=item)

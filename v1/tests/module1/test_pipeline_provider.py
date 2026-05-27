@@ -41,3 +41,27 @@ def test_pipeline_builds_crawl4ai_fetcher_for_real_search_provider():
     fetcher = _build_fetcher(settings)
 
     assert isinstance(fetcher, Crawl4AIFetcher)
+
+
+def test_pipeline_passes_crawl4ai_options_to_fetcher():
+    settings = Module1Settings(
+        llm_provider="fake",
+        search_provider="web_search",
+        search_api_key="test-search-key",
+        crawl4ai_enable_stealth=False,
+        crawl4ai_use_undetected=True,
+        crawl4ai_headless=False,
+        crawl4ai_max_retries=2,
+        crawl4ai_profile_dir="tmp/tests/profile",
+        crawl4ai_proxy="direct,http://proxy.example.com:8080",
+    )
+
+    fetcher = _build_fetcher(settings)
+
+    assert isinstance(fetcher, Crawl4AIFetcher)
+    assert fetcher.enable_stealth is False
+    assert fetcher.use_undetected_on_block is True
+    assert fetcher.headless is False
+    assert fetcher.max_retries == 2
+    assert str(fetcher.managed_profile_dir).replace("\\", "/") == "tmp/tests/profile"
+    assert fetcher.proxy == "direct,http://proxy.example.com:8080"

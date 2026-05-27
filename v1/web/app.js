@@ -23,6 +23,7 @@ const progressMetrics = {
   fetched: document.querySelector("#metricFetched"),
   fetchSuccess: document.querySelector("#metricFetchSuccess"),
   fetchFailed: document.querySelector("#metricFetchFailed"),
+  fetchBlocked: document.querySelector("#metricFetchBlocked"),
   accepted: document.querySelector("#metricAccepted"),
   warnings: document.querySelector("#metricWarnings"),
 };
@@ -46,6 +47,7 @@ const EVENT_LABELS = {
   news_agent: "新闻 Agent",
   llm_agent: "LLM 决策",
   llm_agent_repair: "JSON 修复",
+  llm_agent_force_final: "强制终局",
   llm_agent_final: "最终决策",
   llm_agent_result: "整理结果",
   tool_call: "工具调用",
@@ -60,6 +62,8 @@ const STATUS_LABELS = {
   completed: "完成",
   success: "成功",
   failed: "失败",
+  blocked: "反爬阻断",
+  metadata_only: "低质量/仅元数据",
   warning: "警告",
   rejected: "拒绝",
   running: "运行中",
@@ -177,6 +181,17 @@ function updateProgress(event) {
     progress.stats.fetched += 1;
     if (row.status === "success") progress.stats.fetchSuccess += 1;
     if (row.status === "failed") progress.stats.fetchFailed += 1;
+    if (row.status === "blocked") progress.stats.fetchBlocked += 1;
+    if (row.status === "metadata_only") progress.stats.fetchFailed += 1;
+    if (["blocked", "metadata_only"].includes(row.status)) {
+      progress.warnings.unshift({
+        title: row.status === "blocked" ? "网页被反爬阻断" : "网页已降级为仅元数据",
+        detail: `${row.publisher || domainFromUrl(row.url)}：${row.error || row.title}`,
+        status: "warning",
+      });
+      progress.warnings = progress.warnings.slice(0, 8);
+      progress.stats.warnings = progress.warnings.length;
+    }
   }
 
   if (event.type === "llm_agent_result") {
@@ -220,6 +235,7 @@ function renderProgress() {
   progressMetrics.fetched.textContent = progress.stats.fetched;
   progressMetrics.fetchSuccess.textContent = progress.stats.fetchSuccess;
   progressMetrics.fetchFailed.textContent = progress.stats.fetchFailed;
+  progressMetrics.fetchBlocked.textContent = progress.stats.fetchBlocked;
   progressMetrics.accepted.textContent = progress.stats.accepted;
   progressMetrics.warnings.textContent = progress.stats.warnings;
 
@@ -243,8 +259,8 @@ function renderProgress() {
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${escapeHtml(item.publisher || "-")}</td>
-        <td><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></td>
         <td><span class="fetch-pill ${escapeHtml(item.status)}">${statusLabel(item.status)}</span></td>
+        <td><a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></td>
         <td>${escapeHtml(item.error || "")}</td>
       `;
       fetchTableBody.appendChild(row);
@@ -315,7 +331,15 @@ function summarizeEvent(event) {
     detail = (data.queries || []).join(" / ");
     chips.push(data.provider || "搜索服务");
   } else if (isFetchReturn(event)) {
-    title = data.fetch_status === "success" ? `抓取成功：${data.title || data.url}` : `抓取失败：${data.title || data.url}`;
+    if (data.fetch_status === "success") {
+      title = `抓取成功：${data.title || data.url}`;
+    } else if (data.fetch_status === "blocked") {
+      title = `反爬阻断：${data.title || data.url}`;
+    } else if (data.fetch_status === "metadata_only") {
+      title = `低质量降级：${data.title || data.url}`;
+    } else {
+      title = `抓取失败：${data.title || data.url}`;
+    }
     detail = data.error || `来源：${data.publisher || domainFromUrl(data.url)}${data.published_at ? `，发布时间：${data.published_at}` : ""}`;
     chips.push(data.publisher || domainFromUrl(data.url));
     chips.push(statusLabel(data.fetch_status || event.status));
@@ -331,6 +355,9 @@ function summarizeEvent(event) {
   } else if (event.type === "llm_agent_repair") {
     title = event.status === "completed" ? "JSON 自动修复成功" : event.status === "started" ? "正在修复 LLM JSON" : "JSON 自动修复失败";
     detail = data.error || "";
+  } else if (event.type === "llm_agent_force_final") {
+    title = event.status === "completed" ? "LLM 已完成最终选择" : event.status === "started" ? "工具轮数用尽，要求最终选择" : "最终选择失败并进入兜底";
+    detail = data.error || `${data.documents?.length || data.accepted_urls?.length || 0} 条候选进入终局判断`;
   } else if (event.type === "llm_agent_result") {
     const count = data.source_documents?.length || 0;
     title = `整理出 ${count} 条可用来源`;
@@ -437,6 +464,7 @@ function createProgressState() {
       fetched: 0,
       fetchSuccess: 0,
       fetchFailed: 0,
+      fetchBlocked: 0,
       accepted: 0,
       warnings: 0,
     },
@@ -458,7 +486,7 @@ function stageForEvent(event) {
   if (["config", "scope", "timeline", "task", "sources", "news_collect"].includes(event.type)) return "prepare";
   if (isSearchEvent(event)) return "search";
   if (isFetchEvent(event)) return "fetch";
-  if (["news_agent", "llm_agent", "llm_agent_repair", "llm_agent_final", "llm_agent_result"].includes(event.type)) return "decide";
+  if (["news_agent", "llm_agent", "llm_agent_repair", "llm_agent_force_final", "llm_agent_final", "llm_agent_result"].includes(event.type)) return "decide";
   if (["storage", "done"].includes(event.type)) return "storage";
   return null;
 }

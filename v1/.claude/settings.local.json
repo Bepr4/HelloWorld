@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(conda create *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }

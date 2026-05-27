@@ -6,6 +6,8 @@ def test_clean_article_text_removes_common_page_noise():
     raw_text = """
 Share
 Copy
+* Copy
+* Print
 Link copied
 [Home](https://www.example.com)
 Advertisement
@@ -23,9 +25,29 @@ The second paragraph adds context from officials and witnesses, without relying 
 
     assert "Share" not in cleaned
     assert "Advertisement" not in cleaned
+    assert "* Copy" not in cleaned
+    assert "* Print" not in cleaned
     assert "Another story" not in cleaned
     assert "US officials said" in cleaned
     assert "The second paragraph adds context" in cleaned
+
+
+def test_clean_article_text_deduplicates_headings_and_strips_links():
+    raw_text = """
+# Trump offers mixed messages about path ahead for US war against Iran
+## Trump offers mixed messages about path ahead for US war against Iran
+Trump offers mixed messages about path ahead for US war against Iran
+
+The United States said it forcibly seized an Iranian-flagged cargo ship near the Strait of Hormuz, according to [officials](https://example.com/officials), while diplomats urged restraint.
+* Copy
+* Print
+"""
+
+    cleaned = clean_article_text(raw_text)
+
+    assert cleaned.count("Trump offers mixed messages about path ahead for US war against Iran") == 1
+    assert "[officials]" not in cleaned
+    assert "according to officials" in cleaned
 
 
 def test_first_meaningful_excerpt_prefers_article_paragraph():

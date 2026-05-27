@@ -89,7 +89,7 @@ class SourceDocument(Module1Model):
     collection_pass: Literal["timeline_pass", "discovery_pass"] = "timeline_pass"
     content_hash: str | None = None
     raw_text_path: str | None = None
-    fetch_status: Literal["success", "metadata_only", "failed"]
+    fetch_status: Literal["success", "metadata_only", "blocked", "failed"]
     fetch_error: str | None = None
     relevance_score: float | None = None
 
@@ -201,7 +201,7 @@ class FetchedPage(Module1Model):
     title: str | None = None
     text: str | None = None
     published_at: str | None = None
-    status: Literal["success", "metadata_only", "failed"]
+    status: Literal["success", "metadata_only", "blocked", "failed"]
     error: str | None = None
 
 

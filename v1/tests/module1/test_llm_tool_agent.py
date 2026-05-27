@@ -286,3 +286,106 @@ def test_llm_tool_agent_repairs_invalid_final_json_before_fallback():
     assert "Return ONLY one repaired JSON object" in client.calls[-1][-1]["content"]
     assert any(event[0] == "llm_agent_repair" and event[1] == "started" for event in events)
     assert any(event[0] == "llm_agent_repair" and event[1] == "completed" for event in events)
+
+
+def test_llm_tool_agent_filters_blocked_urls_even_when_final_accepts_them():
+    registry = SourceRegistry(
+        [
+            SourceEntry(domain="reuters.com", source_tier="P1", source_type="wire", language="en"),
+        ]
+    )
+    task = Coordinator().build_timeline_collection_task(
+        Coordinator().confirm_scope("最新美伊冲突", confirmed_event="最新美伊冲突"),
+        [TimelineItem(timeline_item_id="tl_001", time_type="background", title="最新美伊冲突", summary="最新美伊冲突")],
+        event_id="event_test",
+    )
+    url = "https://www.reuters.com/world/example"
+    search_provider = StaticSearchProvider(
+        [
+            SearchResult(
+                url=url,
+                title="Reuters blocked example",
+                snippet="Reuters reported a development.",
+                discovery_method="tavily_search",
+            )
+        ]
+    )
+    fetcher = InMemoryFetcher(
+        {
+            url: FetchedPage(
+                url=url,
+                title="Reuters blocked example",
+                status="blocked",
+                error="HTTP 401: Blocked by anti-bot protection: DataDome captcha",
+            )
+        }
+    )
+    client = FakeAgentClient(
+        text_responses=[
+            '{"thought":"search","tool_calls":[{"tool":"web_search","args":{"queries":["site:reuters.com US Iran conflict"]}}],"final":null}',
+            f'{{"thought":"fetch","tool_calls":[{{"tool":"fetch_url","args":{{"url":"{url}"}}}}],"final":null}}',
+            f'{{"thought":"done","tool_calls":[],"final":{{"accepted_urls":["{url}"],"news_blocks":[],"timeline_update_suggestions":[]}}}}',
+        ]
+    )
+
+    result = LLMNewsToolAgent(source_registry=registry, search_provider=search_provider, fetcher=fetcher).run(
+        task,
+        agent_client=client,
+    )
+
+    assert result.source_documents == []
+
+
+def test_llm_tool_agent_forces_final_when_tool_budget_is_exhausted():
+    registry = SourceRegistry(
+        [
+            SourceEntry(domain="aljazeera.com", source_tier="P1", source_type="international_media", language="en"),
+        ]
+    )
+    task = Coordinator().build_timeline_collection_task(
+        Coordinator().confirm_scope("最新美伊冲突", confirmed_event="最新美伊冲突"),
+        [TimelineItem(timeline_item_id="tl_001", time_type="background", title="最新美伊冲突", summary="最新美伊冲突")],
+        event_id="event_test",
+    )
+    url = "https://www.aljazeera.com/news/test"
+    search_provider = StaticSearchProvider(
+        [
+            SearchResult(
+                url=url,
+                title="US Iran tensions rise",
+                snippet="US and Iran conflict latest developments",
+                discovery_method="tavily_search",
+            )
+        ]
+    )
+    fetcher = InMemoryFetcher(
+        {
+            url: FetchedPage(
+                url=url,
+                title="US Iran tensions rise",
+                text="US and Iran tensions rose after new military warnings.",
+                status="success",
+            )
+        }
+    )
+    client = FakeAgentClient(
+        text_responses=[
+            '{"thought":"search","tool_calls":[{"tool":"web_search","args":{"queries":["site:aljazeera.com US Iran conflict"]}}],"final":null}',
+            f'{{"thought":"fetch","tool_calls":[{{"tool":"fetch_url","args":{{"url":"{url}"}}}}],"final":null}}',
+            f'{{"thought":"forced final","tool_calls":[],"final":{{"accepted_urls":["{url}"],"news_blocks":[],"timeline_update_suggestions":[]}}}}',
+        ]
+    )
+    events = []
+    agent = LLMNewsToolAgent(
+        source_registry=registry,
+        search_provider=search_provider,
+        fetcher=fetcher,
+        max_steps=2,
+    )
+
+    result = agent.run(task, agent_client=client, emit=lambda *args: events.append(args))
+
+    assert len(client.calls) == 3
+    assert len(result.source_documents) == 1
+    assert any(event[0] == "llm_agent_force_final" and event[1] == "started" for event in events)
+    assert any(event[0] == "llm_agent_force_final" and event[1] == "completed" for event in events)
