@@ -54,6 +54,9 @@ def test_pipeline_passes_crawl4ai_options_to_fetcher():
         crawl4ai_max_retries=2,
         crawl4ai_profile_dir="tmp/tests/profile",
         crawl4ai_proxy="direct,http://proxy.example.com:8080",
+        crawl4ai_enable_bm25=False,
+        crawl4ai_bm25_threshold=1.3,
+        crawl4ai_bm25_language="chinese",
     )
 
     fetcher = _build_fetcher(settings)
@@ -65,3 +68,6 @@ def test_pipeline_passes_crawl4ai_options_to_fetcher():
     assert fetcher.max_retries == 2
     assert str(fetcher.managed_profile_dir).replace("\\", "/") == "tmp/tests/profile"
     assert fetcher.proxy == "direct,http://proxy.example.com:8080"
+    assert fetcher.enable_bm25_filter is False
+    assert fetcher.bm25_threshold == 1.3
+    assert fetcher.bm25_language == "chinese"

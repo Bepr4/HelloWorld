@@ -18,6 +18,7 @@ from module1.models import (
 from module1.news.agent import _document_from_candidate
 from module1.news.block_builder import NewsBlockBuilder
 from module1.news.deduper import dedupe_source_documents
+from module1.news.fetch_context import build_fetch_query, fetch_with_query
 from module1.news.source_registry import SourceEntry, SourceRegistry
 from module1.news.text_cleaner import first_meaningful_excerpt
 
@@ -216,7 +217,8 @@ class LLMNewsToolAgent:
 
         key = _url_key(url)
         candidate = self.candidates_by_url.get(key) or _candidate_from_url(url, source_meta)
-        fetched = self.fetcher.fetch(url)
+        fetch_query = build_fetch_query(task, candidate)
+        fetched = fetch_with_query(self.fetcher, url, fetch_query)
         document = _document_from_candidate(task.event_id, candidate, fetched)
         if not document.timeline_item_id:
             document.timeline_item_id = _default_timeline_item_id(task)
@@ -232,6 +234,7 @@ class LLMNewsToolAgent:
             "publisher": document.publisher,
             "source_tier": document.source_tier,
             "fetch_status": document.fetch_status,
+            "fetch_query": fetch_query,
             "published_at": document.published_at,
             "text_preview": (fetched.text or candidate.snippet or "")[:1600],
             "error": fetched.error,

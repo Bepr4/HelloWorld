@@ -157,4 +157,7 @@ def _build_fetcher(settings: Module1Settings):
         max_retries=settings.crawl4ai_max_retries,
         managed_profile_dir=settings.crawl4ai_profile_dir,
         proxy=settings.crawl4ai_proxy,
+        enable_bm25_filter=settings.crawl4ai_enable_bm25,
+        bm25_threshold=settings.crawl4ai_bm25_threshold,
+        bm25_language=settings.crawl4ai_bm25_language,
     )

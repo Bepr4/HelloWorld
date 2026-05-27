@@ -85,3 +85,62 @@ def test_news_agent_collects_blocks_and_timeline_suggestions():
     assert result.news_blocks[0].reported_facts
     assert result.timeline_update_suggestions
     assert result.timeline_update_suggestions[0].suggested_start_date == "2020-01-04"
+
+
+def test_news_agent_passes_event_query_to_fetcher():
+    registry = SourceRegistry(
+        [
+            SourceEntry(domain="reuters.com", source_tier="P1", source_type="wire", language="en"),
+        ]
+    )
+    url = "https://www.reuters.com/world/soleimani-jan-3"
+    search = StaticSearchProvider(
+        [
+            SearchResult(
+                url=url,
+                title="Soleimani conflict strike on 2020-01-03",
+                snippet="US Iran conflict latest Strait of Hormuz analysis",
+                published_at="2020-01-03",
+            ),
+        ]
+    )
+
+    class RecordingFetcher:
+        def __init__(self):
+            self.queries: list[str | None] = []
+
+        def fetch(self, url: str, query: str | None = None) -> FetchedPage:
+            self.queries.append(query)
+            return FetchedPage(
+                url=url,
+                title="Soleimani conflict strike on 2020-01-03",
+                text="Soleimani conflict strike on 2020-01-03 involved US and Iran forces.",
+                published_at="2020-01-03",
+                status="success",
+            )
+
+    scope = Coordinator().confirm_scope(
+        "Soleimani conflict",
+        confirmed_event="Soleimani conflict",
+        confirmed_scope="Soleimani conflict involving US and Iran forces",
+    )
+    baseline = [
+        TimelineItem(
+            timeline_item_id="tl_001",
+            time_type="point",
+            start_date="2020-01-03",
+            title="Soleimani conflict strike",
+            summary="Soleimani conflict strike on 2020-01-03",
+            search_keywords=["Soleimani conflict", "strike"],
+        ),
+    ]
+    task = Coordinator().build_timeline_collection_task(scope, baseline, event_id="event_test")
+    fetcher = RecordingFetcher()
+    agent = NewsAgent(SourceCollector(registry, search), fetcher=fetcher)
+
+    agent.run(task)
+
+    assert fetcher.queries
+    assert "Soleimani conflict involving US and Iran forces" in fetcher.queries[0]
+    assert "Soleimani conflict strike" in fetcher.queries[0]
+    assert "US Iran conflict latest Strait of Hormuz analysis" in fetcher.queries[0]

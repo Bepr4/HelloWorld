@@ -116,6 +116,9 @@ def test_settings_load_crawl4ai_escalation_options():
             "MODULE1_CRAWL4AI_MAX_RETRIES": "2",
             "MODULE1_CRAWL4AI_PROFILE_DIR": "tmp/tests/crawl4ai-profile",
             "MODULE1_CRAWL4AI_PROXY": "direct,http://proxy.example.com:8080",
+            "MODULE1_CRAWL4AI_ENABLE_BM25": "false",
+            "MODULE1_CRAWL4AI_BM25_THRESHOLD": "1.4",
+            "MODULE1_CRAWL4AI_BM25_LANGUAGE": "chinese",
         },
     )
 
@@ -125,6 +128,9 @@ def test_settings_load_crawl4ai_escalation_options():
     assert settings.crawl4ai_max_retries == 2
     assert str(settings.crawl4ai_profile_dir).replace("\\", "/") == "tmp/tests/crawl4ai-profile"
     assert settings.crawl4ai_proxy == "direct,http://proxy.example.com:8080"
+    assert settings.crawl4ai_enable_bm25 is False
+    assert settings.crawl4ai_bm25_threshold == 1.4
+    assert settings.crawl4ai_bm25_language == "chinese"
 
 
 def test_settings_require_search_key_for_web_search():

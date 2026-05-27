@@ -13,6 +13,7 @@ from module1.models import (
 )
 from module1.news.block_builder import NewsBlockBuilder
 from module1.news.deduper import content_hash, dedupe_source_documents, source_id_for_url
+from module1.news.fetch_context import build_fetch_query, fetch_with_query
 from module1.news.fetcher import InMemoryFetcher
 from module1.news.relevance_judge import RelevanceJudge
 from module1.news.source_collector import SourceCollector
@@ -53,12 +54,13 @@ class NewsAgent:
         suggestions: list[TimelineUpdateSuggestion] = []
 
         for candidate in _dedupe_candidates(candidates):
-            fetched = self.fetcher.fetch(candidate.url)
+            item = _find_item(task, candidate.timeline_item_id)
+            fetch_query = build_fetch_query(task, candidate, item=item)
+            fetched = fetch_with_query(self.fetcher, candidate.url, fetch_query)
             document = _document_from_candidate(task.event_id, candidate, fetched)
             if fetched.status != "success" or not fetched.text:
                 continue
             text = fetched.text or candidate.snippet or ""
-            item = _find_item(task, candidate.timeline_item_id)
             decision = self.relevance_judge.judge_source(document, task, text=text, item=item)
             if not decision.is_relevant or decision.confidence < 0.65:
                 continue

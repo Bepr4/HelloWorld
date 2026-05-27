@@ -54,6 +54,9 @@ class Module1Settings(BaseModel):
     crawl4ai_max_retries: int = Field(default=1, ge=0)
     crawl4ai_profile_dir: Path | None = None
     crawl4ai_proxy: str | None = None
+    crawl4ai_enable_bm25: bool = True
+    crawl4ai_bm25_threshold: float = Field(default=1.0, gt=0)
+    crawl4ai_bm25_language: str = "english"
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -245,6 +248,9 @@ def load_module1_settings(
             else None
         ),
         crawl4ai_proxy=merged.get("MODULE1_CRAWL4AI_PROXY") or None,
+        crawl4ai_enable_bm25=_as_bool(merged.get("MODULE1_CRAWL4AI_ENABLE_BM25"), True),
+        crawl4ai_bm25_threshold=float(merged.get("MODULE1_CRAWL4AI_BM25_THRESHOLD", "1.0")),
+        crawl4ai_bm25_language=merged.get("MODULE1_CRAWL4AI_BM25_LANGUAGE", "english"),
     )
 
     if require_llm_key and provider.lower() not in {"fake", "mock", "none"}:

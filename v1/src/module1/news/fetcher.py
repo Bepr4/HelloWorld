@@ -27,7 +27,7 @@ class UrlLibFetcher:
         self.user_agent = user_agent
         self.timeout = timeout
 
-    def fetch(self, url: str) -> FetchedPage:
+    def fetch(self, url: str, query: str | None = None) -> FetchedPage:
         """抓取一个 URL，并返回 success / metadata_only / failed 三种状态。"""
 
         request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
@@ -50,7 +50,7 @@ class InMemoryFetcher:
     def __init__(self, pages: dict[str, FetchedPage | str]) -> None:
         self.pages = pages
 
-    def fetch(self, url: str) -> FetchedPage:
+    def fetch(self, url: str, query: str | None = None) -> FetchedPage:
         value = self.pages.get(url)
         if value is None:
             return FetchedPage(url=url, status="failed", error="not found in in-memory fetcher")
@@ -72,13 +72,16 @@ class Crawl4AIFetcher:
         timeout: int = 20,
         *,
         base_directory: str | Path | None = None,
-        crawler: Callable[[str], Awaitable[Any]] | None = None,
+        crawler: Callable[..., Awaitable[Any]] | None = None,
         enable_stealth: bool = True,
         use_undetected_on_block: bool = True,
         headless: bool = True,
         max_retries: int = 1,
         managed_profile_dir: str | Path | None = None,
         proxy: str | None = None,
+        enable_bm25_filter: bool = True,
+        bm25_threshold: float = 1.0,
+        bm25_language: str = "english",
     ) -> None:
         self.user_agent = user_agent
         self.timeout = timeout
@@ -90,21 +93,24 @@ class Crawl4AIFetcher:
         self.max_retries = max_retries
         self.managed_profile_dir = Path(managed_profile_dir) if managed_profile_dir else None
         self.proxy = proxy
+        self.enable_bm25_filter = enable_bm25_filter
+        self.bm25_threshold = bm25_threshold
+        self.bm25_language = bm25_language
 
-    def fetch(self, url: str) -> FetchedPage:
+    def fetch(self, url: str, query: str | None = None) -> FetchedPage:
         """用 Crawl4AI 抓取 URL，并把失败原因保留到 FetchedPage.error。"""
 
         try:
-            result = _run_async(self._crawl(url))
+            result = _run_async(self._crawl(url, query=query))
         except Exception as exc:
             error = f"{exc.__class__.__name__}: {exc}"
             return FetchedPage(url=url, status=_status_from_error(error), error=error)
 
         return self._result_to_page(url, result)
 
-    async def _crawl(self, url: str) -> Any:
+    async def _crawl(self, url: str, query: str | None = None) -> Any:
         if self._crawler is not None:
-            return await self._crawler(url)
+            return await _call_crawler(self._crawler, url, query=query)
 
         self._prepare_runtime_directory()
         try:
@@ -117,20 +123,21 @@ class Crawl4AIFetcher:
                 DefaultMarkdownGenerator,
                 ProxyConfig,
             )
-            from crawl4ai.content_filter_strategy import PruningContentFilter
+            from crawl4ai.content_filter_strategy import BM25ContentFilter, PruningContentFilter
         except ImportError as exc:
             raise RuntimeError("crawl4ai is not installed. Install project dependencies before running fetch_url.") from exc
         _disable_crawl4ai_robots_db(crawl4ai_webcrawler)
 
+        content_filter = self._build_content_filter(
+            query=query,
+            BM25ContentFilter=BM25ContentFilter,
+            PruningContentFilter=PruningContentFilter,
+        )
         markdown_generator = _make_config(
             DefaultMarkdownGenerator,
-            content_filter=_make_config(
-                PruningContentFilter,
-                threshold=0.5,
-                threshold_type="dynamic",
-                min_word_threshold=40,
-            ),
+            content_filter=content_filter,
             options={"ignore_links": True, "escape_html": False},
+            content_source="cleaned_html",
         )
         run_config = _make_config(
             CrawlerRunConfig,
@@ -199,6 +206,30 @@ class Crawl4AIFetcher:
             return undetected
 
         return normal
+
+    def _build_content_filter(
+        self,
+        *,
+        query: str | None,
+        BM25ContentFilter: type,
+        PruningContentFilter: type,
+    ) -> Any:
+        """有事件查询时用 BM25 保留相关段落，否则沿用通用 Pruning 清洗。"""
+
+        normalized_query = (query or "").strip()
+        if self.enable_bm25_filter and normalized_query:
+            return _make_config(
+                BM25ContentFilter,
+                user_query=normalized_query,
+                bm25_threshold=self.bm25_threshold,
+                language=self.bm25_language,
+            )
+        return _make_config(
+            PruningContentFilter,
+            threshold=0.5,
+            threshold_type="dynamic",
+            min_word_threshold=40,
+        )
 
     async def _crawl_once(
         self,
@@ -354,6 +385,21 @@ def _run_async(coro: Awaitable[Any]) -> Any:
     if "error" in result:
         raise result["error"]
     return result.get("value")
+
+
+async def _call_crawler(crawler: Callable[..., Awaitable[Any]], url: str, *, query: str | None) -> Any:
+    """测试注入的 crawler 如果支持 query，就同步收到 BM25 查询上下文。"""
+
+    try:
+        signature = inspect.signature(crawler)
+    except (TypeError, ValueError):
+        return await crawler(url)
+    accepts_query = "query" in signature.parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
+    )
+    if accepts_query:
+        return await crawler(url, query=query)
+    return await crawler(url)
 
 
 def _make_config(config_cls: type, **kwargs: Any) -> Any:

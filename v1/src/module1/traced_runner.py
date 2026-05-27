@@ -28,6 +28,7 @@ from module1.news.agent import (
 )
 from module1.news.block_builder import NewsBlockBuilder
 from module1.news.deduper import dedupe_source_documents
+from module1.news.fetch_context import build_fetch_query, fetch_with_query
 from module1.news.llm_tool_agent import LLMNewsToolAgent
 from module1.news.relevance_judge import RelevanceJudge
 from module1.news.source_collector import SourceCollector
@@ -232,7 +233,9 @@ def _build_news_result_with_trace(
             f"抓取来源 {index}/{len(candidates)}",
             candidate.model_dump(mode="json"),
         )
-        fetched = fetcher.fetch(candidate.url)
+        item = _find_item(task, candidate.timeline_item_id)
+        fetch_query = build_fetch_query(task, candidate, item=item)
+        fetched = fetch_with_query(fetcher, candidate.url, fetch_query)
         document = _document_from_candidate(task.event_id, candidate, fetched)
         emit(
             "fetch",
@@ -248,7 +251,6 @@ def _build_news_result_with_trace(
         )
 
         text = fetched.text or candidate.snippet or ""
-        item = _find_item(task, candidate.timeline_item_id)
         decision = relevance_judge.judge_source(document, task, text=text, item=item)
         emit(
             "relevance",

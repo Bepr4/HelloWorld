@@ -61,6 +61,37 @@ def test_crawl4ai_fetcher_maps_markdown_result_to_fetched_page():
     assert page.text == article_text
 
 
+def test_crawl4ai_fetcher_passes_bm25_query_to_injected_crawler():
+    captured = {}
+
+    async def fake_crawler(url: str, query: str | None = None):
+        captured["query"] = query
+        return SimpleNamespace(
+            url=url,
+            success=True,
+            markdown=SimpleNamespace(
+                fit_markdown=(
+                    "Reuters reported the latest development after officials held emergency meetings and regional governments "
+                    "urged both sides to avoid additional escalation. Diplomats said the talks focused on keeping maritime routes "
+                    "open while military commanders reviewed defensive deployments across the region and briefed allied governments "
+                    "about possible risks to shipping, energy supplies, and civilian flights.\n\n"
+                    "The report added that analysts were watching whether public threats would translate into action, while energy "
+                    "markets and neighboring states prepared for further uncertainty over the coming days. Officials said the next "
+                    "round of contacts would test whether both governments could preserve a fragile diplomatic channel."
+                ),
+                raw_markdown="Navigation that should not be preferred.",
+            ),
+            metadata={"title": "Reuters title"},
+        )
+
+    fetcher = Crawl4AIFetcher(crawler=fake_crawler)
+
+    page = fetcher.fetch("https://www.reuters.com/world/example", query="US Iran conflict Strait of Hormuz")
+
+    assert page.status == "success"
+    assert captured["query"] == "US Iran conflict Strait of Hormuz"
+
+
 def test_crawl4ai_fetcher_records_failed_crawl_error():
     async def fake_crawler(url: str):
         return SimpleNamespace(
